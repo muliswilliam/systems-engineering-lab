@@ -1,0 +1,102 @@
+name: lab24-postgres-wal-and-replication-basics
+
+# This lab uses `bitnami/postgresql` instead of this repository's usual
+# `postgres:16-alpine`, on both nodes. See README.md "Architecture" for the
+# full rationale - short version: the subject of this lab IS physical
+# streaming replication setup, and bitnami's image drives that setup
+# entirely from environment variables (POSTGRESQL_REPLICATION_MODE,
+# POSTGRESQL_REPLICATION_USER/PASSWORD, POSTGRESQL_MASTER_HOST), instead of
+# requiring us to hand-author pg_hba.conf/postgresql.conf/pg_basebackup
+# invocations against the plain postgres image just to get two nodes
+# talking. Every other lab in this repository keeps postgres:16-alpine
+# because they are not teaching replication setup itself.
+services:
+  primary:
+    # bitnami restructured its Docker Hub catalog during 2025: versioned tags
+    # (e.g. "16", "16.6.0-debian-...") now require a paid "Bitnami Secure
+    # Images" subscription, and only "latest" remains publicly pullable.
+    # `latest` currently resolves to PostgreSQL 18.x - newer than the
+    # postgres:16-alpine other labs in this repository use, but this lab is
+    # about replication mechanics that are stable across major versions, not
+    # about a specific Postgres release.
+    image: bitnami/postgresql:latest
+    container_name: lab24-primary
+    environment:
+      POSTGRESQL_REPLICATION_MODE: master
+      POSTGRESQL_REPLICATION_USER: ${REPLICATION_USER:-repl_user}
+      POSTGRESQL_REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-repl_password}
+      # POSTGRESQL_USERNAME defaults to "postgres" - left unset here so
+      # POSTGRESQL_PASSWORD sets the postgres SUPERUSER password directly
+      # (bitnami only exposes a separate POSTGRESQL_POSTGRES_PASSWORD knob
+      # when POSTGRESQL_USERNAME is some OTHER, non-superuser name).
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-lab24}
+      POSTGRESQL_DATABASE: ${POSTGRES_DB:-lab24}
+      # Explicit, not just relying on the (also "no") default - TLS between
+      # app <-> primary and primary <-> replica is out of scope for this lab.
+      POSTGRESQL_ENABLE_TLS: "no"
+    ports:
+      - "${PRIMARY_POSTGRES_PORT:-5424}:5432"
+    volumes:
+      - lab24_primary_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "${POSTGRES_DB:-lab24}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  replica:
+    image: bitnami/postgresql:latest
+    container_name: lab24-replica
+    environment:
+      POSTGRESQL_REPLICATION_MODE: slave
+      POSTGRESQL_REPLICATION_USER: ${REPLICATION_USER:-repl_user}
+      POSTGRESQL_REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-repl_password}
+      POSTGRESQL_MASTER_HOST: primary
+      POSTGRESQL_MASTER_PORT_NUMBER: "5432"
+      # Must match the primary's superuser password - the replica's initial
+      # pg_basebackup and the ongoing streaming connection both authenticate
+      # against the primary, and the replica's own data directory is
+      # entirely replaced by a base backup of the primary's, so these values
+      # describe "how do I reach and copy from the primary," not "what
+      # database do I create locally."
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-lab24}
+      POSTGRESQL_DATABASE: ${POSTGRES_DB:-lab24}
+      POSTGRESQL_ENABLE_TLS: "no"
+    ports:
+      - "${REPLICA_POSTGRES_PORT:-5524}:5432"
+    volumes:
+      - lab24_replica_data:/bitnami/postgresql
+    depends_on:
+      primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "${POSTGRES_DB:-lab24}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  pgweb-primary:
+    image: sosedoff/pgweb
+    container_name: lab24-pgweb-primary
+    environment:
+      PGWEB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-lab24}@primary:5432/${POSTGRES_DB:-lab24}?sslmode=disable
+    ports:
+      - "${PRIMARY_PGWEB_PORT:-8424}:8081"
+    depends_on:
+      primary:
+        condition: service_healthy
+
+  pgweb-replica:
+    image: sosedoff/pgweb
+    container_name: lab24-pgweb-replica
+    environment:
+      PGWEB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-lab24}@replica:5432/${POSTGRES_DB:-lab24}?sslmode=disable
+    ports:
+      - "${REPLICA_PGWEB_PORT:-8524}:8081"
+    depends_on:
+      replica:
+        condition: service_healthy
+
+volumes:
+  lab24_primary_data:
+  lab24_replica_data:

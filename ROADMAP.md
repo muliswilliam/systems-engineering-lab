@@ -50,7 +50,7 @@ own README and `.env.example` are the source of truth for its actual ports.
 ## Phase 6 - Connections and PostgreSQL Scaling
 
 - [ ] 23 - connection-management-and-pgbouncer
-- [ ] 24 - postgres-wal-and-replication-basics
+- [x] 24 - postgres-wal-and-replication-basics - a genuine two-node `bitnami/postgresql` primary/standby topology (physical async streaming replication, driven entirely by `POSTGRESQL_REPLICATION_MODE`/`POSTGRESQL_MASTER_HOST` env vars rather than hand-authored `pg_hba.conf`/`pg_basebackup`, since Docker Hub only serves bitnami's `latest` tag for free as of 2025, currently PostgreSQL 18.6); real captured replication lag across 20 sequential primary writes (min 0.40ms / max 7.56ms / avg 2.51ms on a local loopback network), a real `pg_current_wal_lsn()` advance (`0/3060388` -> `0/3063508`, 12,672 bytes per `pg_wal_lsn_diff()`) cross-checked against `pg_stat_replication`'s `sent_lsn`/`write_lsn`/`flush_lsn`/`replay_lsn` all matching the replica's own `pg_last_wal_replay_lsn()`, a real captured SQLSTATE 25006 ("cannot execute INSERT in a read-only transaction") from a direct write attempt against the replica, and a real, deterministic ~300ms stale-read window produced via Postgres's own `recovery_min_apply_delay` standby feature (not a fake/simulated delay) with a measured 303.8ms catch-up. Domain: a fresh, minimal standalone `widgets` table - not one of SPEC.md 8.2's five named domains, same "small standalone table, the lesson is the mechanism" rationale as Lab 06's `counters`/Lab 11's `documents`/Lab 19's `notifications`. Ports 5424/8424 (primary), 5524/8524 (replica).
 - [ ] 25 - primary-read-replica-routing
 - [ ] 26 - replication-lag-and-read-after-write
 - [ ] 27 - cascading-replicas
@@ -202,7 +202,19 @@ own README and `.env.example` are the source of truth for its actual ports.
   domains, same "small standalone table, the lesson is the mechanism"
   rationale as Lab 06's `counters`/Lab 11's `documents`; also adds a
   Redis service alongside Postgres/PGweb (`redis:7-alpine`, host port
-  6422), independent of Lab 21's own, separate Redis usage.
+  6422), independent of Lab 21's own, separate Redis usage, 24 a fresh,
+  standalone `widgets` table (id/public_id/name/value/updated_at) - again
+  not one of SPEC.md 8.2's five named domains, same "small standalone
+  table, the lesson is the mechanism" rationale as Lab 06's
+  `counters`/Lab 11's `documents`/Lab 22's `resource_state`. Lab 24 is
+  also the first lab in this repository with a genuine two-Postgres-node
+  topology (`primary` + `replica`, physical streaming replication), and
+  the first to use `bitnami/postgresql` instead of `postgres:16-alpine`
+  on BOTH nodes specifically because this lab's subject is replication
+  setup itself - see the lab's README "Architecture" for the full
+  rationale and the bitnami-tag-availability caveat (only `latest`,
+  currently PostgreSQL 18.6, is pullable without a paid subscription as
+  of 2025).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
@@ -244,3 +256,12 @@ own README and `.env.example` are the source of truth for its actual ports.
   concurrent, independent Redis usage does not share any code with Lab
   22's) - no changes were made to `packages/`, so no other lab needed
   re-validation.
+- Lab 24 adds no new shared-package code either (`@labs/db-utils`'s
+  existing `createPool`/`waitForDatabase` are reused as-is for BOTH the
+  primary and replica connections - `src/db/primary-client.ts` and
+  `src/db/replica-client.ts` are the only new client modules, one per
+  node) - no changes were made to `packages/`, so no other lab needed
+  re-validation. `src/db/migrate.ts` and `drizzle.config.ts` point only at
+  `PRIMARY_DATABASE_URL`; the replica never runs its own migration, per the
+  lab's own point that a physical standby receives its schema via WAL
+  replay, not a second `drizzle-kit` run.
