@@ -1,0 +1,38 @@
+name: lab14-job-queue-skip-locked
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab14-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab14}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab14}
+      POSTGRES_DB: ${POSTGRES_DB:-lab14}
+    # log_statement=all makes the FOR UPDATE SKIP LOCKED claim query, the
+    # UPDATE/INSERT pairs, and BEGIN/COMMIT/ROLLBACK visible in
+    # `docker compose logs postgres` - this lab is entirely about what that
+    # one claim query does under concurrency.
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "${POSTGRES_PORT:-5414}:5432"
+    volumes:
+      - lab14_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab14} -d ${POSTGRES_DB:-lab14}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab14-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab14}:${POSTGRES_PASSWORD:-lab14}@postgres:5432/${POSTGRES_DB:-lab14}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8414}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab14_postgres_data:
