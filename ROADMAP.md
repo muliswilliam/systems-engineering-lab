@@ -73,7 +73,7 @@ Postgres node.
 
 - [x] 31 - vacuum-autovacuum-and-bloat - 15 full-table `UPDATE` passes over a real 50,000-row table with `autovacuum_enabled = false` set on that table only grew it from a real measured 5.09MB to 80.86MB (15.87x) while `SELECT COUNT(*)` still correctly reported 50,000 live rows the entire time (`n_dead_tup` climbed to 748,276, matching 15 x 50,000 tuple versions); cloning the table's current live rows into a freshly-written `page_views_fresh` and running the identical `EXPLAIN (ANALYZE, BUFFERS) SELECT COUNT(*)` against both showed the bloated table touching 10,350 buffers against the fresh table's 704 - a real 14.7x more pages read for the identical logical result. The fix, both forms, real and measured: plain `VACUUM` dropped `n_dead_tup` from 1,596,808 to 15 while `pg_relation_size` stayed at exactly 169.75MB (unchanged, since plain VACUUM marks space reusable rather than returning it to the OS) with 15 concurrent probe connections seeing a worst-case latency of only 24.81ms against its own 143.37ms duration; `VACUUM FULL` against the identical table genuinely shrank the file to 8.16MB (a real 20.79x reduction) but the same concurrent-write probes saw a worst case of 101.7ms against an 89.77ms `VACUUM FULL` duration (`vacuumFullBlockRatio: 1.133`) - a write queued when the `ACCESS EXCLUSIVE` lock was grabbed waited for essentially the entire operation. A separate, fully deterministic test (not wall-clock racing) proved the underlying lock-conflict mechanism directly: a transaction holding nothing but a `SELECT`'s `AccessShareLock` produced a real SQLSTATE `55P03` lock-timeout against a concurrent `VACUUM FULL` after ~150ms, while the identical held lock did not block a concurrent plain `VACUUM` at all. Autovacuum itself was proven to actually run, not just assumed: with `autovacuum_vacuum_scale_factor = 0`/`autovacuum_vacuum_threshold = 50` set per-table and `autovacuum_naptime = 2s` set instance-wide (this lab's own dedicated Postgres only), `pg_stat_user_tables.autovacuum_count` advanced from 0 to 1 and `n_dead_tup` dropped from 5,000 to 0 within a real measured 2.02 seconds, with zero `VACUUM` command run by hand. 7 tests across 4 files passed in a real captured 3.1-4.5s run across multiple full runs; a complete `docker compose down -v` -> `up -d` -> migrate -> seed -> test cycle was re-verified working, PGweb confirmed reachable (HTTP 200), and seeding confirmed idempotent (identical 5,000-row count across two consecutive `pnpm seed` runs). A real PostgreSQL observability gotcha was discovered and documented along the way: a single backend only flushes its own pending `pg_stat_user_tables` report at most once per ~1 second, so hammering many UPDATEs through one long-lived, reused connection left this lab's own dead/live tuple readings stale (briefly showing `n_live_tup` at double the real row count during development) - fixed by running every mutating statement on its own short-lived, explicitly-closed connection, plus an explicit `pg_stat_reset_single_table_counters` call right after each reseed's `TRUNCATE` for a synchronous, guaranteed-clean baseline. Domain: a fresh, standalone `page_views` table (id/public_id/slug/view_count/updated_at) - not one of SPEC.md 8.2's five named domains, same "small standalone table, the lesson is the mechanism" rationale as Lab 06's `counters`/Lab 30's `orders`; deliberately not Lab 06's own `counters` table despite the surface similarity, since this lab needs table-scale churn (thousands of rows, many passes) rather than single-tuple-scale `pageinspect` mechanics. Ports 5431/8431.
 - [ ] 32 - deadlocks-and-lock-debugging
-- [ ] 33 - query-tuning-and-explain-analyze
+- [x] 33 - query-tuning-and-explain-analyze - four genuinely distinct slow-query patterns against a real 199,895-order / 601,142-order_line dataset (`--seed=42 --size=large`, seeded in ~24s), every EXPLAIN captured via `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` rather than text-regex parsing: Pattern 1 bad row estimates, two distinct causes - stale statistics (a real bulk `UPDATE` recategorized 50,000 orders to `'cancelled'`, pushing the true fraction from 7.98% to 33.00% while `idx_orders_status`'s pre-existing stats still said 8%, producing a real captured 3.32x estimate-vs-actual divergence that `ANALYZE` alone corrected to 0.99x in 56ms) and correlated columns (`orders.channel` deliberately correlated with `status` at the data level - 88.3% of cancelled orders are `channel = 'phone'` by construction - producing a real captured 2.96x independence-assumption undercount for `status = 'cancelled' AND channel = 'phone'` that `CREATE STATISTICS ... (dependencies, mcv)` corrected to 0.99x, `ANALYZE` alone provably could not fix it); Pattern 2 a missing-index 3-table JOIN (paid orders in a 7-day window joined to customers + order_lines) where two new indexes turned a 36.084ms Hash-Join-plus-double-Seq-Scan into a 20.206ms Nested-Loop-plus-Index-Scan plan - a real, deliberately reported non-monotonic result where total buffer touches went UP (8,995 -> 11,327, +26%) while wall-clock time still dropped 44%, used to teach that sequential and random I/O are not equally expensive per buffer; Pattern 3 a non-sargable `date_trunc('month', placed_at AT TIME ZONE 'UTC') = ?` reporting query (14.239ms, 17.2x row-estimate undercount) fixed two ways - an expression index (4.496ms, ~3.2x faster) and a preferred sargable range rewrite reusing the SAME plain `placed_at` index Pattern 2 and Pattern 4 also need (3.334ms, ~4.3x faster, no new single-purpose index) - plus a real captured gotcha where `CREATE INDEX` alone did NOT fix the row estimate until an explicit `ANALYZE` ran afterward; Pattern 4 `ORDER BY placed_at DESC LIMIT 20` with no supporting index forcing a full Seq-Scan-plus-Sort (18.167ms, 2,309 buffers) fixed by a plain B-tree index eliminating the Sort node entirely (0.083ms, 23 buffers - a real ~219x speedup and ~100x fewer buffers). Real write-amplification measured for the combined 4 indexes: 554ms/108,295 rows-per-sec with 0 present vs. 614ms/97,787 rows-per-sec with all 4 present (~11% slower, ~10% lower throughput) for an identical 20,000-order/~40,000-order_line insert batch. Two real, worth-documenting implementation bugs surfaced and fixed during this lab's own development: (1) Postgres's per-node `Buffers` counters in JSON-format EXPLAIN output are CUMULATIVE (a parent node's count already includes every descendant's), so naively summing every node's buffer count over-counted a real query's total usage by ~7x (61,231 summed vs. 8,995 actual) until fixed to read only the root node's count; (2) node-pg parses a Postgres `timestamp without time zone` value using the HOST's local timezone rather than UTC, which silently corrupted a month-boundary calculation on this lab's own (UTC+3) build host until fixed by doing all date arithmetic in SQL and passing pre-formatted, explicitly-UTC-suffixed text as query parameters instead of round-tripping through JS `Date` objects. 13 Vitest integration tests across 2 files (index usability/correctness for all 4 indexes, plus estimate-divergence-improves invariants for both Pattern 1 sub-cases) passed in a real captured ~1.5s run against a fresh small seed. A full `docker compose down -v` -> `up -d` -> migrate -> seed -> test cycle was re-verified working, PGweb confirmed reachable (HTTP 200), and seeding confirmed idempotent (identical 909-order count across two consecutive `pnpm seed --size=small` runs). Domain: commerce, reused in SHAPE from Lab 03/04 (`customers`/`products`/`orders`/`order_lines`, a fresh independent copy, not imported) plus one new locally-generated column (`orders.channel`) not part of the shared `@labs/data-generators` commerce generators. Ports 5433/8433.
 - [ ] 34 - pagination-at-scale
 - [ ] 35 - partitioning
 
@@ -300,7 +300,16 @@ Postgres node.
   Lab 31 needs table-scale UPDATE churn (thousands of rows, many full-table
   passes) to make physical size and `pg_stat_user_tables` dead-tuple counts
   measurable, where Lab 06 deliberately uses a single hand-picked row for
-  `pageinspect`-level tuple-version inspection.
+  `pageinspect`-level tuple-version inspection, 33 commerce, reused in SHAPE
+  from Lab 03/04 (`customers`/`products`/`orders`/`order_lines`, a fresh
+  independent copy per the independent-labs principle, not imported from
+  either lab) seeded via the EXISTING `generateCustomers`/`generateProducts`/
+  `generateOrdersBatched` generators in
+  `packages/data-generators/src/commerce.ts` as-is, plus one new column
+  (`orders.channel`) generated LOCALLY in this lab's own `src/seed/seed.ts`
+  (via a small `src/seed/generate-channel.ts` helper, deliberately correlated
+  with `status` at the data level - Pattern 1b's whole point) rather than
+  added to the shared generator, since no other lab needs it.
 - Lab 25 adds no new shared-package code either - it reuses `@labs/db-utils`'s
   `createPool`/`waitForDatabase` and `@labs/data-generators`'s EXISTING
   `generateProducts` as-is (the same generator Lab 21 already partially
@@ -443,3 +452,28 @@ Postgres node.
   `AccessShareLock` plus `lock_timeout`, the same idiom Lab 29/30 use for
   their own lock-blocking proofs), independent of dataset size or timing
   luck.
+- Lab 33 adds no new shared-package code and made no changes under
+  `packages/`, so no other lab needed re-validation - it reuses the EXISTING
+  `generateCustomers`/`generateProducts`/`generateOrdersBatched` generators
+  in `packages/data-generators/src/commerce.ts` as-is (`orders.channel` is
+  generated locally via a new lab-local `src/seed/generate-channel.ts`
+  module, not added to the shared generator, since no other lab needs it).
+  `src/scenarios/explain-json.ts` (`explainAnalyzeJson`) is this lab's own
+  `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` parsing utility, a JSON-based
+  successor to Lab 04's text-regex `explain-utils.ts` built specifically
+  because this lab needs precise per-node `Plan Rows` vs `Actual Rows` and
+  buffer counts rather than Lab 04's coarser scan-type detection - kept
+  lab-local rather than promoted to a shared package since Lab 32
+  (deadlocks-and-lock-debugging) and other later performance-adjacent labs
+  may want a different shape of it and no second consumer exists yet. Two
+  real implementation bugs were found and fixed during this lab's own
+  validation, both documented in its README "Architecture": (1) Postgres's
+  per-node JSON `Buffers` counters are cumulative (inclusive of every
+  descendant node), not exclusive, so this lab's own first draft of
+  `explainAnalyzeJson` over-counted total buffer usage by summing every
+  node instead of reading only the root node's count; (2) node-pg parses a
+  Postgres `timestamp without time zone` value using the host's LOCAL
+  timezone rather than UTC, which silently corrupted a month-boundary
+  calculation on this lab's own UTC+3 build host until fixed by doing all
+  date arithmetic in SQL (`to_char`-formatted text) rather than round-
+  tripping through JS `Date` objects - see `src/scenarios/sample-window.ts`.
