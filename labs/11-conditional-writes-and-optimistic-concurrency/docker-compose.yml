@@ -1,0 +1,39 @@
+name: lab11-conditional-writes-and-optimistic-concurrency
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab11-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab11}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab11}
+      POSTGRES_DB: ${POSTGRES_DB:-lab11}
+    # log_statement=all makes every literal UPDATE ... WHERE ... AND version = $N
+    # (and the SELECT ... FOR UPDATE used only for the pessimistic comparison)
+    # visible in `docker compose logs postgres` - this lab is entirely about
+    # what a WHERE clause does or does not match, so seeing the exact
+    # statements matters.
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "${POSTGRES_PORT:-5411}:5432"
+    volumes:
+      - lab11_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab11} -d ${POSTGRES_DB:-lab11}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab11-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab11}:${POSTGRES_PASSWORD:-lab11}@postgres:5432/${POSTGRES_DB:-lab11}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8411}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab11_postgres_data:
