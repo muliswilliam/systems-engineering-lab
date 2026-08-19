@@ -1,0 +1,34 @@
+{
+  "name": "lab-27-cascading-replicas",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "seed": "tsx src/seed/seed.ts",
+    "scenario:topology": "tsx src/scenarios/topology-and-fanout.ts",
+    "scenario:cascading-lag": "tsx src/scenarios/cascading-lag.ts",
+    "scenario:upstream-failure": "tsx src/scenarios/upstream-failure.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:reset": "docker compose down -v && docker compose up -d",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@faker-js/faker": "^9.3.0",
+    "@labs/db-utils": "workspace:*",
+    "@labs/logging": "workspace:*",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.4",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@labs/test-utils": "workspace:*",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.28.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
