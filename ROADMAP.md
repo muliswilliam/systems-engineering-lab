@@ -35,7 +35,7 @@ ports.
 ## Phase 4 - Background Work and Messaging
 
 - [ ] 14 - job-queue-skip-locked
-- [ ] 15 - idempotency-and-deduplication
+- [x] 15 - idempotency-and-deduplication - a fresh, self-contained `payments` table (idempotency_key UNIQUE, nullable) where the naive scenario reproduces a real double charge (2 rows for one logical payment with no key, then 10 concurrent retries -> 10 rows even with a real UNIQUE constraint present, because each retry generates its own fresh key instead of reusing one) vs `INSERT ... ON CONFLICT (idempotency_key) DO NOTHING RETURNING *` + fallback `SELECT` producing exactly 1 row from 10 concurrent same-key retries, with every one of the 10 callers proven (not just row-counted) to receive an identical response; a third scenario extends the pattern to a non-deterministic computed result (a random confirmation code + fee), proving a retry gets back the ORIGINAL persisted value even though every one of 10 concurrent callers independently computed its own, different value first. Domain: a fresh, standalone `payments` table (not the full SPEC.md 8.2 commerce order/checkout model - the same "small standalone table" rationale as Lab 06's `counters`/Lab 11's `documents`). Ports 5415/8415.
 - [ ] 16 - transactional-outbox
 - [ ] 17 - outbox-workers-skip-locked
 - [ ] 18 - inbox-pattern-and-idempotent-consumers
@@ -127,7 +127,11 @@ ports.
   aspirational venue/section/ticket-inventory/orders/payments model for the
   domain - see Lab 12's README "Architecture" for the scoping rationale; a
   reservation is modeled as the seat row's own state, not a separate
-  `reservations` table).
+  `reservations` table), 15 a fresh, standalone `payments` table (idempotency
+  keys/duplicate-charge protection, not SPEC.md 8.2's full commerce
+  order/checkout model - same "small standalone table, not one of the five
+  named domains" rationale as Lab 06's `counters` and Lab 11's `documents`;
+  defined only in Lab 15's own schema, not shared).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
