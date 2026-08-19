@@ -1,0 +1,37 @@
+name: lab17-outbox-workers-skip-locked
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab17-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab17}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab17}
+      POSTGRES_DB: ${POSTGRES_DB:-lab17}
+    # log_statement=all makes every claim/publish/finalize statement visible in
+    # `docker compose logs postgres` - this lab is entirely about what
+    # SELECT ... FOR UPDATE SKIP LOCKED and the follow-up UPDATEs actually do.
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "${POSTGRES_PORT:-5417}:5432"
+    volumes:
+      - lab17_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab17} -d ${POSTGRES_DB:-lab17}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab17-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab17}:${POSTGRES_PASSWORD:-lab17}@postgres:5432/${POSTGRES_DB:-lab17}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8417}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab17_postgres_data:

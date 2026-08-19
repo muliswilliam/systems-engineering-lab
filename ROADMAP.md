@@ -37,7 +37,7 @@ ports.
 - [x] 14 - job-queue-skip-locked - real 1/5/50-concurrent-worker draining of a shared `jobs` table via `SELECT ... FOR UPDATE SKIP LOCKED` (raw SQL, one claim transaction per job): 5 workers over 100 jobs each claimed exactly 20 (wall clock 71ms), 50 workers over 250 jobs each claimed exactly 5 with zero double-claims (wall clock 125ms; a fresh 200-job integration-test run measured 94ms); a `locked_until` lease lets a job whose worker never releases it (simulated crash) become reclaimable and completed by a different worker (measured reclaim latency 15ms past a 300ms lease); bounded retries via `attempts`/`max_attempts` move a job to a terminal `failed` status after 3 failed attempts and it is never claimed again; a real measured contrast (plain `FOR UPDATE` blocked a second worker for 312ms behind the first worker's lock vs. `SKIP LOCKED` resolving in 10ms by skipping to a different row) makes the naive-vs-fixed case concrete. No `workers` table - workers are ephemeral, identified only by a `worker_id` string on `job_attempts` (see README "Architecture" for why). Domain: background processing, new (`jobs` + `job_attempts`). Ports 5414/8414.
 - [ ] 15 - idempotency-and-deduplication
 - [ ] 16 - transactional-outbox
-- [ ] 17 - outbox-workers-skip-locked
+- [x] 17 - outbox-workers-skip-locked - a fresh, self-contained `outbox_events` table (`pending`/`processing`/`published`/`failed`) claimed via the same `SELECT ... FOR UPDATE SKIP LOCKED` + lease pattern Lab 14 established, rebuilt independently: 10 workers draining 30 seeded events claimed exactly 30 unique rows with zero double-claims (wall clock 30ms), and 300 events drained the same way in 119ms; a dedicated crashed-publisher demonstration then proves the limitation CLAUDE.md requires be taught explicitly - a worker claims an event, a simulated broker genuinely accepts it, the worker "crashes" before recording that fact, a second worker reclaims the lease-expired row and also calls the broker, and a real measured `brokerCallCount: 2` for one logical event proves SKIP LOCKED's safe claim does not make delivery exactly-once; an idempotent-consumer-preview scenario then replays the identical interleaving through a Postgres-native `INSERT ... ON CONFLICT DO NOTHING` dedup check (`processed_events`, unique on `event_public_id`) and shows the same 2 broker calls produce exactly 1 applied side effect - explicitly scoped in the README as a preview of Lab 18, not a full inbox implementation. No real broker - an in-process `createSimulatedBroker` (succeed/fail/slow modes, records every call) per CLAUDE.md's infrastructure-minimalism guidance. Domain: background processing/messaging (order-lifecycle event types: `OrderCreated`/`PaymentCaptured`/`OrderShipped`/`InventoryAdjusted`/`RefundIssued`), new (`outbox_events` + `processed_events`) - does not model Lab 16's write side or `orders` table. Ports 5417/8417.
 - [ ] 18 - inbox-pattern-and-idempotent-consumers
 - [ ] 19 - message-delivery-semantics
 - [ ] 20 - sagas-and-distributed-workflows
@@ -142,7 +142,15 @@ ports.
   `packages/data-generators/src/jobs.ts` gained the reusable `generateJobs`
   generator, exported from `index.ts`, purely additive alongside the
   existing payroll/commerce/ledger/ticketing generators - Labs 01 and 05
-  were re-validated and are unaffected).
+  were re-validated and are unaffected), 17 background processing/messaging
+  (a fresh, independent `outbox_events` + `processed_events` schema -
+  deliberately not Lab 16's `orders` table or outbox: Lab 17's focus is the
+  PUBLISHING side only, so its outbox rows are seeded directly rather than
+  written by a modeled order-creation flow; `packages/data-generators/src/
+  outbox.ts` gained the new `generateOutboxEvents` generator, order-lifecycle
+  event types (`OrderCreated`/`PaymentCaptured`/`OrderShipped`/
+  `InventoryAdjusted`/`RefundIssued`), purely additive alongside the existing
+  generators - Labs 01 and 05 were re-validated and are unaffected).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
