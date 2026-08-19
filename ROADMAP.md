@@ -18,6 +18,12 @@ setting per instance) increments sequentially from there (`6323`, `6324`,
 PgBouncer instances in one lab is a lab-specific need, not a second
 Postgres node.
 
+New with Lab 38: a lab that runs its own in-process HTTP service (not
+containerized, same as every other lab's `pnpm dev`) uses host port `4NN`
+for that service. A lab that adds a real Prometheus container uses `9NN`
+for it; a lab that adds Grafana (none yet) would use `3NN`, following the
+same pattern.
+
 ## Phase 1 - PostgreSQL and Drizzle Foundations
 
 - [x] 01 - postgres-drizzle-foundation - Docker Compose + Postgres + PGweb + Drizzle + seed + raw SQL alongside Drizzle. Domain: payroll (companies, employees). Ports 5401/8401.
@@ -84,7 +90,7 @@ Postgres node.
 
 ## Phase 10 - Observability and Security
 
-- [ ] 38 - observability
+- [x] 38 - observability - a small real HTTP service (Node's own `http` module, no framework) backed by a fresh, standalone `orders` lookup table, instrumented with all three observability pillars for real and tied together into one connected incident, not four disconnected demos. **Structured logging**: the identical 300-request real traffic run, logged both as structured Pino ndjson and as three deliberately inconsistent free-text formats (a stand-in for three engineers' diverging `console.log` calls); a real `JSON.parse`+group-by aggregation over the structured file computed EXACT real numbers (`/orders/:id: total=288, errorRate=9.7%, p50=1.86ms, p95=308.84ms, p99=311.24ms`; overall `300 completed, 28 errors, 9.33%`), while a single reasonable regex against the free-text file recovered only `100 of 300 lines (33%)` and could not express outcome at all for the lines it did match. **Metrics**: a real `prom-client` registry (`http_requests_total` Counter, `http_request_duration_seconds` Histogram, `http_requests_in_flight` Gauge, `http_errors_total` Counter, plus real `pg.Pool`-sourced `db_pool_total_clients`/`db_pool_idle_clients`/`db_pool_waiting_clients` gauges - the last one a real, literal "queue depth," not a metaphor) exposed at a real `/metrics` endpoint; scraping it via a real HTTP GET after 250 real requests summed `http_requests_total` back to exactly `250`, and a real, deployed `prom/prometheus` container (`docker-compose.yml`, scraping `pnpm dev`'s live process via `host.docker.internal`) reported real `up{job="lab38-observability-service"} == 1` via Prometheus's own query API during this lab's own validation - Grafana was deliberately not added (see README "Why a real Prometheus container, and no Grafana" for the scope tradeoff). **Correlation IDs**: 5 requests fired CONCURRENTLY, each with its own `x-request-id`, produced 27 real interleaved log lines; filtering by one target ID recovered exactly that request's own 5-line path (`request.start` -> `db.query.start`/`db.query.end` -> `business_logic.start` -> `request.complete` with a real captured `err.message="Cannot read properties of null (reading 'split')"`), with zero lines from the other 4 concurrent requests mixed in. **Postgres inspection**: `packages/db-utils/sql`'s existing scripts, reused unmodified (not duplicated), run against REAL concurrent activity this lab generated itself - a real long-running `pg_sleep(6)` transaction, a real `SELECT ... FOR UPDATE` lock holder, and a real blocked `UPDATE` writer - with `show-blocked-queries.sql` correctly pairing the real blocked PID to its real blocking PID, and `show-active-transactions.sql` correctly showing the `pg_sleep`-backed query still running. **Tied together**: a `scenario:debug-narrative` walk (300 requests) used structured logs to find `28 errors (9.7%)` and one slow outlier, a correlation ID to prove the error's own database query succeeded normally (failure was application-only), `/metrics` to confirm `http_errors_total{route="/orders/:id"}=28` matched exactly (SYSTEMIC, not a fluke), and a live `pg_stat_activity` sample to show 5 real `pg_sleep`-backed backends during a slow burst (database IS a contributing cause) vs. 0 non-idle backends during an error burst (database is NOT a contributing cause of the errors) - the same four tools, in the same order, a real on-call engineer would use. The lab's own real bug (`business-logic.ts`'s unguarded `order.customerEmail!.split("@")` against ~5% seeded guest-checkout rows with `customer_email IS NULL`) was verified fixable with a real one-line change during this lab's own validation (errors dropped from 28 to 0) and then deliberately reverted, since the bug's presence is what the shipped lab's own tests and every captured number above depend on - the same reasoning Lab 10/12's naive code paths stay in their repos permanently. 10 Vitest integration tests across 5 files passed in a real captured ~28-30s run (exact metric-counter-vs-real-traffic assertions, exact structured-log-vs-traffic-mix assertions, a real blocked-query PID-pairing assertion, seed determinism); `pnpm typecheck` passed with zero errors; a complete `docker compose down -v` -> `up -d` -> migrate -> seed (idempotent: `400` rows/`20` guest-checkout both times) -> typecheck -> test cycle was re-verified working, and PGweb confirmed reachable (HTTP 200). Domain: see "Domains by lab" below. Ports 5438/8438 (Postgres/PGweb), `4438` (the lab's own HTTP service, a new port convention this lab establishes - see the port-convention header above), `9438` (Prometheus).
 - [ ] 39 - row-level-security-and-db-security
 
 ## Phase 11 - Capstone
@@ -364,7 +370,18 @@ Postgres node.
   method modeling a payment-processor-style call whose ledger write commits
   before its slow response is sent), not a database table - flavor text for
   a generic "downstream API call," per the task's own framing, rather than
-  one of SPEC.md 8.2's five named domains.
+  one of SPEC.md 8.2's five named domains, 38 a fresh, standalone `orders`
+  table (id/public_id/customer_email/amount_cents/status/created_at) - not
+  Lab 03/04's commerce-schema `orders` and not Lab 20's saga-oriented
+  `orders`, same "small standalone table, the lesson is the mechanism"
+  rationale as Lab 06's `counters`/Lab 31's `page_views`, since this lab's
+  subject is the observability TOOLING (structured logs, metrics,
+  correlation IDs, Postgres inspection) rather than a rich order domain.
+  `customer_email` is nullable specifically to model a real "guest
+  checkout" edge case: this lab's own `business-logic.ts` derives an email
+  domain from it without a null check, a real, reproducible bug (not an
+  injected fake exception) that is this lab's entire "error" traffic
+  bucket and the incident its debug-narrative scenario diagnoses.
 - Lab 25 adds no new shared-package code either - it reuses `@labs/db-utils`'s
   `createPool`/`waitForDatabase` and `@labs/data-generators`'s EXISTING
   `generateProducts` as-is (the same generator Lab 21 already partially
@@ -626,3 +643,18 @@ Postgres node.
   `@labs/test-utils`'s existing `runConcurrently` is reused as-is for the
   retry-storm scenario's 50 concurrent callers, the same helper Labs
   15/18/21 already use.
+- Lab 38 adds no new shared-package code and made no changes under
+  `packages/` - it reads `packages/db-utils/sql/*.sql` directly (a new
+  `src/observability/db-sql.ts` loader resolves a plain monorepo-relative
+  path rather than Node's package `exports` map, since that is simpler and
+  does not depend on how `@labs/db-utils` happens to be linked into
+  `node_modules`), which is the first time any lab actually runs those
+  shared SQL scripts rather than just having them available. Its structured
+  vs. free-text logger (`src/observability/request-logger.ts`) is
+  deliberately lab-local rather than added to `@labs/logging`: it needs a
+  second, durable ndjson-FILE output that every other lab does not, and
+  adding that purely for one lab risked changing behavior other labs
+  depend on. This lab is also the first to run its own in-process HTTP
+  service and the first to add a real Prometheus container - both establish
+  new port-convention entries (see the port-convention header) for any
+  later lab that adds either.
