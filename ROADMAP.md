@@ -60,7 +60,7 @@ Postgres node.
 - [x] 23 - connection-management-and-pgbouncer - direct-connection exhaustion reproduced against a deliberately-lowered `max_connections=30` (50 concurrent direct connections: 29 succeeded, 21 real `SQLSTATE 53300` rejections, 364ms) vs the same style of burst multiplexed through a transaction-pooling PgBouncer instance (60 concurrent clients, all succeeded, peak real Postgres backends measured via `pg_stat_activity` never exceeded `default_pool_size=10`); two PgBouncer instances (`pgbouncer-session`/`pgbouncer-transaction`, ports 6323/6324 - see the port-convention note above) since `pool_mode` is one setting per instance; session-state incompatibility demonstrated with a custom GUC, a temp table, and a prepared statement (session pooling preserved 5/5 trials, transaction pooling 0/5, each backed by a real, distinct Postgres error) - `SET application_name` was tried first and found to be a bad marker, since PgBouncer tracks and replays it across backends in every pool mode; `default_pool_size` tuning measured directly (40 concurrent clients: pool size 2 took 1062ms, pool size 20 took 199ms). Domain: a fresh, minimal `widgets` table (id/public_id/name/value) - this lab is about connection/pooling mechanics, not data modeling. Ports 5423/8423, PgBouncer 6323/6324.
 - [x] 24 - postgres-wal-and-replication-basics - a genuine two-node `bitnami/postgresql` primary/standby topology (physical async streaming replication, driven entirely by `POSTGRESQL_REPLICATION_MODE`/`POSTGRESQL_MASTER_HOST` env vars rather than hand-authored `pg_hba.conf`/`pg_basebackup`, since Docker Hub only serves bitnami's `latest` tag for free as of 2025, currently PostgreSQL 18.6); real captured replication lag across 20 sequential primary writes (min 0.40ms / max 7.56ms / avg 2.51ms on a local loopback network), a real `pg_current_wal_lsn()` advance (`0/3060388` -> `0/3063508`, 12,672 bytes per `pg_wal_lsn_diff()`) cross-checked against `pg_stat_replication`'s `sent_lsn`/`write_lsn`/`flush_lsn`/`replay_lsn` all matching the replica's own `pg_last_wal_replay_lsn()`, a real captured SQLSTATE 25006 ("cannot execute INSERT in a read-only transaction") from a direct write attempt against the replica, and a real, deterministic ~300ms stale-read window produced via Postgres's own `recovery_min_apply_delay` standby feature (not a fake/simulated delay) with a measured 303.8ms catch-up. Domain: a fresh, minimal standalone `widgets` table - not one of SPEC.md 8.2's five named domains, same "small standalone table, the lesson is the mechanism" rationale as Lab 06's `counters`/Lab 11's `documents`/Lab 19's `notifications`. Ports 5424/8424 (primary), 5524/8524 (replica).
 - [x] 25 - primary-read-replica-routing - one execution engine (`createRouter`) parameterized by a pure, unit-tested `classify(kind)` routing table over four operation kinds (`write`/`read`/`read-after-write`/`transaction`), reusing Lab 24's two-node `bitnami/postgresql` primary/replica topology as-is (own ports/volumes/project name, no shared state); the naive classify table (all reads incl. read-after-write and transaction -> replica) reproduced a REAL, un-simulated read-after-write staleness bug two ways - a natural race with zero artificial delay (real captured run: 5 of 100 immediate write-then-read trials via the naive router were stale, `staleRate: 0.05`) and a deterministic version using the same real `recovery_min_apply_delay` standby feature Lab 24 used, set to 150ms (20 of 20 trials stale, 100%); the corrected classify table (read-after-write and transaction -> primary) verified 0 stale reads across 50 trials under the identical 150ms delay via its default "route to primary" strategy (real captured avg read latency 0.29ms, un-affected by lag) and, as an explicitly-offered alternate strategy, 0 stale reads across 10 trials via a real `pg_last_wal_replay_lsn() >= targetLsn` comparison instead of a fixed sleep (real captured avg latency 155.64ms, tracking the configured 150ms delay almost exactly - see the lab's README for why LSN comparison beats guessing at a sleep duration); a third scenario proved transactions cannot be split across nodes with a real captured Postgres rejection (`SQLSTATE 25006`, "cannot execute SELECT FOR UPDATE in a read-only transaction") when the naive table routes a purchase's locking read to the replica, versus the corrected table's identical transaction succeeding on the primary and correctly decrementing seeded stock (100 -> 90 for a quantity-10 purchase); 13 tests across 4 files (1 pure classify-table unit test file, 3 real-database integration test files) passed in a real captured 4.49s run; full `docker compose down -v` -> `up -d` cycle re-confirmed `pg_stat_replication` showing a connected, streaming replica, both PGweb instances reachable (HTTP 200), and the seed script confirmed idempotent (identical row count on a second run). Domain: commerce-adjacent, a fresh, independent `products` table (id/public_id/name/category/price_cents/stock_quantity/updated_at) reusing the shape of the EXISTING `generateProducts` generator (`name`/`category`/`unitPriceCents` carried over as `name`/`category`/`priceCents`, `sku` dropped - no column for it, same partial-reuse pattern Lab 21 established), `stock_quantity` generated separately via its own seeded Faker instance. Ports 5425/8425 (primary), 5525/8525 (replica).
-- [ ] 26 - replication-lag-and-read-after-write
+- [x] 26 - replication-lag-and-read-after-write - a real, independent two-node `bitnami/postgresql` primary/replica topology (own docker-compose.yml/ports/volumes, no shared state with Lab 24/25) reproducing the read-after-write bug end to end - `POST /profile` writes a new `display_name` on the primary, an immediate unguarded `SELECT` on the replica (naive scenario) came back stale on a real, repeated, captured 20/20 trials (100% stale rate) under a genuine 400ms `recovery_min_apply_delay` (the same real Postgres standby feature Lab 24 uses, not a fake sleep) - then three concrete mitigation strategies, each measured against the same real induced lag: Strategy A (read-your-writes routed to the primary) scored 20/20 correct regardless of lag, plus a second part that deliberately used a too-short 250ms sticky window against the real 400ms delay and reproduced the strategy's own documented limitation (a stale read even after the window "expired"); Strategy B (LSN-gated read - capture `pg_current_wal_lsn()` at write time, poll the replica's `pg_last_wal_replay_lsn()` until it catches up) measured a real average wait of 403.2ms under the 400ms delay and 0.4ms with no delay, 15/15 correct in both cases, proving the wait adapts to genuine replication state rather than a guessed constant; Strategy C (bounded staleness via `pg_stat_replication`) triggered its primary-fallback on 15/15 trials under real induced lag and 0/15 trials once the delay was removed, both with 15/15 correct reads - this lab's own validation run surfaced a real, worth-documenting gotcha along the way: `pg_stat_replication.replay_lag` (the interval column) badly under-reports lag while `recovery_min_apply_delay` is actively withholding replay confirmation (measured climbing 0.86ms -> 51ms across a 50ms-wide trial window that should have shown ~400ms), so Strategy C routes on the byte-based `pg_wal_lsn_diff` backlog instead, which reacted correctly and immediately. Full `docker compose down -v` -> `up -d` reset cycle re-confirmed real streaming replication (`pg_stat_replication` showing exactly one `streaming` replica) and all 9 Vitest integration tests passed identically before and after the reset, across 3 repeated full-suite runs with zero flakes. Domain: a fresh, standalone `user_profiles` table (id/public_id/display_name/bio/updated_at) mirroring SPEC.md's own Lab 26 profile-edit scenario directly - not one of SPEC.md 8.2's five named domains, same "small standalone table, the lesson is the mechanism" rationale as Lab 06's `counters`/Lab 24's `widgets`. Ports 5426/8426 (primary), 5526/8526 (replica).
 - [ ] 27 - cascading-replicas
 - [ ] 28 - failover-and-role-changes
 
@@ -242,7 +242,18 @@ Postgres node.
   instance (offset `seed + 1000`) since `generateProducts` has no opinion
   about it. Reuses Lab 24's two-node `bitnami/postgresql` primary/replica
   topology verbatim (own Compose project name/network/volumes/ports/
-  database - no shared state with Lab 24), 29 commerce-adjacent, a fresh,
+  database - no shared state with Lab 24), 26 a fresh, standalone `user_profiles`
+  table (id/public_id/display_name/bio/updated_at) - again not one of
+  SPEC.md 8.2's five named domains, same "small standalone table, the
+  lesson is the mechanism" rationale as Lab 06's `counters`/Lab 24's
+  `widgets`; this table mirrors SPEC.md's own Lab 26 "POST /profile" example
+  directly rather than being a generic placeholder. Lab 26 is its own,
+  fully independent second two-Postgres-node topology (own
+  docker-compose.yml/ports/volumes/database, no shared Docker network or
+  state with Lab 24's or Lab 25's), reusing the SAME `bitnami/postgresql`
+  primary/replica SHAPE Lab 24 established (for the same reasons) but built
+  fresh rather than imported, per the independent-labs principle, 29
+  commerce-adjacent, a fresh,
   independent `customers` table (id/public_id/full_name/
   display_name/email/country) reusing the shape of the EXISTING
   `generateCustomers` generator in `packages/data-generators/src/commerce.ts`
@@ -258,6 +269,13 @@ Postgres node.
   natural promotion candidate once Lab 26+ needs the same `classify`/
   `createRouter` shape. No changes were made to `packages/`, so no other
   lab needed re-validation.
+- Lab 26 also adds no new shared-package code and made no changes under
+  `packages/` - its `src/lib/replication-control.ts` (real
+  `recovery_min_apply_delay` control, LSN capture/wait, and byte-based
+  replication-backlog measurement via `pg_wal_lsn_diff`) is a lab-local
+  module, not a promotion of Lab 24's or Lab 25's inline equivalents, since
+  each lab's own replication-control code stays independent per the
+  independent-labs principle; no other lab needed re-validation.
 - Lab 29 adds no new shared-package code and made no changes under
   `packages/` - it reuses the EXISTING `generateCustomers` generator as-is,
   so no other lab needed re-validation. The dangerous rename in
@@ -317,3 +335,14 @@ Postgres node.
   `PRIMARY_DATABASE_URL`; the replica never runs its own migration, per the
   lab's own point that a physical standby receives its schema via WAL
   replay, not a second `drizzle-kit` run.
+- Lab 26 adds no new shared-package code (same `@labs/db-utils`
+  `createPool`/`waitForDatabase` reuse as Lab 24) - no changes were made to
+  `packages/`, so no other lab needed re-validation. It does add one new
+  lab-local module, `src/lib/replication-control.ts`, holding the
+  `setReplicaApplyDelay`/`getPrimaryWalLsn`/`waitForReplicaLsnAtLeast`/
+  `getReplicationLagFromPrimary`/`waitForReplicationCaughtUp` primitives
+  every scenario and test in this lab shares - kept lab-local rather than
+  promoted to a shared package since Lab 27/28 (this repository's other
+  planned replication labs) may need a different shape of these primitives
+  once cascading replicas and failover are in play, and no second consumer
+  exists yet to justify generalizing now.
