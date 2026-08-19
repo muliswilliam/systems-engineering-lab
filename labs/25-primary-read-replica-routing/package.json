@@ -1,0 +1,36 @@
+{
+  "name": "lab-25-primary-read-replica-routing",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "echo \"Lab 25 has no long-running server - run pnpm scenario:naive-read-after-write, scenario:corrected-read-after-write, or scenario:transaction-routing instead\"",
+    "seed": "tsx src/seed/seed.ts",
+    "scenario:naive-read-after-write": "tsx src/scenarios/naive-router-stale-read.ts",
+    "scenario:corrected-read-after-write": "tsx src/scenarios/corrected-router-read-after-write.ts",
+    "scenario:transaction-routing": "tsx src/scenarios/transaction-must-run-on-primary.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:reset": "docker compose down -v && docker compose up -d",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@faker-js/faker": "^9.3.0",
+    "@labs/data-generators": "workspace:*",
+    "@labs/db-utils": "workspace:*",
+    "@labs/logging": "workspace:*",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.4",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@labs/test-utils": "workspace:*",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.28.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
