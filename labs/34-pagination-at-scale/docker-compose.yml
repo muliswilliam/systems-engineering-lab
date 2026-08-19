@@ -1,0 +1,33 @@
+name: lab34-pagination-at-scale
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab34-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab34}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab34}
+      POSTGRES_DB: ${POSTGRES_DB:-lab34}
+    ports:
+      - "${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - lab34_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab34} -d ${POSTGRES_DB:-lab34}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab34-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab34}:${POSTGRES_PASSWORD:-lab34}@postgres:5432/${POSTGRES_DB:-lab34}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8434}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab34_postgres_data:
