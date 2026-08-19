@@ -36,7 +36,7 @@ ports.
 
 - [ ] 14 - job-queue-skip-locked
 - [ ] 15 - idempotency-and-deduplication
-- [ ] 16 - transactional-outbox
+- [x] 16 - transactional-outbox - naive dual write reproduced in both directions (DB commits then simulated broker publish fails, leaving a durable order with zero recoverable `outbox_events` rows; simulated broker publish succeeds then the order INSERT is rejected by a real `orders_amount_cents_positive` CHECK violation (23514), leaving zero order rows despite the broker believing the event was sent) vs the fix (`BEGIN`; `INSERT order`; `INSERT outbox_event`; `COMMIT`), with a forced outbox-INSERT CHECK violation rolling back both rows together, plus a minimal one-shot (non-`SKIP LOCKED`, explicitly scoped as a Lab 17 preview) `drainOutbox` that publishes only `published_at IS NULL` rows and does not re-publish on a second run. Domain: a fresh, minimal commerce-adjacent schema, new (`orders` + `outbox_events` - deliberately not SPEC.md's full commerce model). Ports 5416/8416.
 - [ ] 17 - outbox-workers-skip-locked
 - [ ] 18 - inbox-pattern-and-idempotent-consumers
 - [ ] 19 - message-delivery-semantics
@@ -137,7 +137,13 @@ ports.
   the same idempotent-reseed pattern Lab 07's `SCENARIO_ACCOUNTS`
   established, rather than SPEC.md's illustrative literal ids 5/6 which
   would not survive a reseed under this repository's delete-then-reinsert
-  seed convention).
+  seed convention), 16 a fresh, minimal commerce-adjacent domain (`orders` +
+  `outbox_events`, deliberately not SPEC.md 8.2's full commerce model - see
+  Lab 16's README "Architecture" for the scoping rationale) seeded with
+  Faker called directly in `src/seed/seed.ts` rather than a new
+  `@labs/data-generators` file, since neither table is a generic reusable
+  entity yet (same "no speculative shared machinery" reasoning as Lab 05's
+  `transfers`).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
