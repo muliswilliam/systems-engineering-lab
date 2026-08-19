@@ -1,0 +1,105 @@
+name: lab23-connection-management-and-pgbouncer
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab23-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab23}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab23}
+      POSTGRES_DB: ${POSTGRES_DB:-lab23}
+    # max_connections is deliberately lowered from Postgres's built-in default
+    # of 100 (see .env.example / README "Break it") so the direct-connection
+    # exhaustion scenario is fast and reliable to reproduce. log_connections/
+    # log_disconnections make each new backend process visible in
+    # `docker compose logs postgres`.
+    command:
+      [
+        "postgres",
+        "-c",
+        "max_connections=${POSTGRES_MAX_CONNECTIONS:-30}",
+        "-c",
+        "log_connections=on",
+        "-c",
+        "log_disconnections=on",
+      ]
+    ports:
+      - "${POSTGRES_PORT:-5423}:5432"
+    volumes:
+      - lab23_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab23} -d ${POSTGRES_DB:-lab23}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab23-pgweb
+    # PGweb connects directly to Postgres, not through PgBouncer: it holds a
+    # long-lived interactive session (schema browsing, ad-hoc queries) which
+    # is exactly the session-state-dependent usage transaction pooling breaks.
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab23}:${POSTGRES_PASSWORD:-lab23}@postgres:5432/${POSTGRES_DB:-lab23}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8423}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Two PgBouncer instances, same Postgres behind both. PgBouncer's pool_mode
+  # is one setting per instance (effectively global here, since this lab has
+  # a single database) - there is no "mixed mode" single instance that runs
+  # session pooling for one client and transaction pooling for another. To
+  # compare both modes side by side against identical data we run two
+  # instances on two ports rather than one instance with a config toggle.
+  # See README "Architecture" for the full rationale and the alternative
+  # (a single pgbouncer.ini with two [databases] entries) we considered.
+  pgbouncer-session:
+    image: edoburu/pgbouncer
+    container_name: lab23-pgbouncer-session
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-lab23}:${POSTGRES_PASSWORD:-lab23}@postgres:5432/${POSTGRES_DB:-lab23}
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: session
+      MAX_CLIENT_CONN: "300"
+      DEFAULT_POOL_SIZE: "10"
+      ADMIN_USERS: ${POSTGRES_USER:-lab23}
+      LOG_CONNECTIONS: "1"
+      LOG_DISCONNECTIONS: "1"
+    ports:
+      - "${PGBOUNCER_SESSION_PORT:-6323}:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgbouncer-transaction:
+    image: edoburu/pgbouncer
+    container_name: lab23-pgbouncer-transaction
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-lab23}:${POSTGRES_PASSWORD:-lab23}@postgres:5432/${POSTGRES_DB:-lab23}
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "300"
+      DEFAULT_POOL_SIZE: "10"
+      ADMIN_USERS: ${POSTGRES_USER:-lab23}
+      LOG_CONNECTIONS: "1"
+      LOG_DISCONNECTIONS: "1"
+    ports:
+      - "${PGBOUNCER_TRANSACTION_PORT:-6324}:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  lab23_postgres_data:
