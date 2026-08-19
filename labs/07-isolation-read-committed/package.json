@@ -1,0 +1,35 @@
+{
+  "name": "lab-07-isolation-read-committed",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "seed": "tsx src/seed/seed.ts",
+    "scenario:dirty-read": "tsx src/scenarios/dirty-read-attempt.ts",
+    "scenario:non-repeatable-read": "tsx src/scenarios/non-repeatable-read.ts",
+    "scenario:isolation-equivalence": "tsx src/scenarios/read-uncommitted-vs-read-committed.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:reset": "docker compose down -v && docker compose up -d",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@labs/db-utils": "workspace:*",
+    "@labs/logging": "workspace:*",
+    "@faker-js/faker": "^9.3.0",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.4",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@labs/test-utils": "workspace:*",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.28.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

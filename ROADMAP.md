@@ -21,7 +21,7 @@ ports.
 
 - [ ] 05 - transactions-and-atomicity
 - [ ] 06 - mvcc-and-visibility
-- [ ] 07 - isolation-read-committed
+- [x] 07 - isolation-read-committed - two independent `pg.Client` connections drive raw `BEGIN`/`SET TRANSACTION ISOLATION LEVEL`/`COMMIT` to reproduce a non-repeatable read under the default Read Committed level (same still-open transaction, two SELECTs of the same row, a committed UPDATE in between returns a different value each time) and to prove Postgres never exposes a dirty read even when a transaction explicitly requests `READ UNCOMMITTED` - plus a direct A/B comparison showing `READ UNCOMMITTED` and `READ COMMITTED` produce byte-for-byte identical read behavior even though `SHOW transaction_isolation` echoes back whichever label was requested. Domain: banking/ledger (a single `accounts` table). Ports 5407/8407.
 - [ ] 08 - repeatable-read-and-snapshots
 - [ ] 09 - serializable-and-retries
 
@@ -93,7 +93,12 @@ ports.
 - Shared packages grow incrementally: only what a given lab actually needs is
   added (e.g. `generateEvents`/`generateSeats` land with the ticketing labs,
   not before).
-- Domains by lab, so far: 01 payroll, 02 payroll, 03 commerce, 04 commerce.
+- Domains by lab, so far: 01 payroll, 02 payroll, 03 commerce, 04 commerce,
+  07 banking/ledger (a minimal single-table `accounts` slice - no
+  `transfers`/`ledger_entries` table yet, since Lab 07 is about isolation
+  semantics, not a rich relational model; a fuller ledger domain is expected
+  to land with Lab 09's Serializable lab, which needs a real multi-row
+  invariant).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
