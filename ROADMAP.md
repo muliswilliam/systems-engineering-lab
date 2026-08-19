@@ -22,7 +22,7 @@ ports.
 - [ ] 05 - transactions-and-atomicity
 - [ ] 06 - mvcc-and-visibility
 - [x] 07 - isolation-read-committed - two independent `pg.Client` connections drive raw `BEGIN`/`SET TRANSACTION ISOLATION LEVEL`/`COMMIT` to reproduce a non-repeatable read under the default Read Committed level (same still-open transaction, two SELECTs of the same row, a committed UPDATE in between returns a different value each time) and to prove Postgres never exposes a dirty read even when a transaction explicitly requests `READ UNCOMMITTED` - plus a direct A/B comparison showing `READ UNCOMMITTED` and `READ COMMITTED` produce byte-for-byte identical read behavior even though `SHOW transaction_isolation` echoes back whichever label was requested. Domain: banking/ledger (a single `accounts` table). Ports 5407/8407.
-- [ ] 08 - repeatable-read-and-snapshots
+- [x] 08 - repeatable-read-and-snapshots - the same non-repeatable-read setup from Lab 07 replayed under `REPEATABLE READ` (one snapshot per transaction, so the second read now returns the stale pre-update value, contrasted in the same test file against a `READ COMMITTED` run of the identical setup, self-contained - no import from Lab 07), a same-row concurrent-write scenario where two `REPEATABLE READ` transactions racing to `UPDATE` one row produce exactly one commit and one `SQLSTATE 40001` ("could not serialize access due to concurrent update"), and a write-skew scenario (the canonical Postgres-docs on-call-doctors example, domain: two `on_call_staff` rows with an "at least one on call" invariant) where both transactions commit successfully yet the invariant ends up violated - Repeatable Read has no same-row conflict to catch across two different rows. Domain: banking/ledger (a fresh, non-imported copy of Lab 07's `accounts` table) plus a small on-call-staff table for write skew. Ports 5408/8408.
 - [ ] 09 - serializable-and-retries
 
 ## Phase 3 - Locks and Concurrency Control
@@ -98,7 +98,13 @@ ports.
   `transfers`/`ledger_entries` table yet, since Lab 07 is about isolation
   semantics, not a rich relational model; a fuller ledger domain is expected
   to land with Lab 09's Serializable lab, which needs a real multi-row
-  invariant).
+  invariant), 08 banking/ledger (its own fresh, non-imported copy of Lab 07's
+  minimal `accounts` slice, same rationale) plus a small standalone
+  `on_call_staff` table (the canonical Postgres-docs write-skew domain - not
+  one of SPEC.md section 8.2's five named domains, since write skew specifically
+  needs a small, easy-to-reason-about cross-row invariant rather than a rich
+  relational model; Lab 09 is still where the fuller multi-row ledger
+  invariant domain is expected to land).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
