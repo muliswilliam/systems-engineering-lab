@@ -1,0 +1,36 @@
+{
+  "name": "lab-23-connection-management-and-pgbouncer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "seed": "tsx src/seed/seed.ts",
+    "scenario:direct-overload": "tsx src/scenarios/direct-connection-overhead.ts",
+    "scenario:transaction-pooling": "tsx src/scenarios/pgbouncer-transaction-pooling.ts",
+    "scenario:session-vs-transaction": "tsx src/scenarios/session-pooling-vs-transaction-pooling.ts",
+    "scenario:pool-size-tuning": "tsx src/scenarios/pool-size-tuning.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:reset": "docker compose down -v && docker compose up -d",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@faker-js/faker": "^9.3.0",
+    "@labs/db-utils": "workspace:*",
+    "@labs/logging": "workspace:*",
+    "@labs/test-utils": "workspace:*",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.4",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.28.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

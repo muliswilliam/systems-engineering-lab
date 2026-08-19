@@ -10,6 +10,14 @@ and `85NN` for the second node, `56NN`/`86NN` for a third, and so on. Labs
 that add Redis (Lab 21+) use `64NN`, mirroring the same pattern. Each lab's
 own README and `.env.example` are the source of truth for its actual ports.
 
+New with Lab 23: labs that add PgBouncer use host port `63NN` for their
+first PgBouncer instance. A lab needing more than one PgBouncer instance
+(Lab 23 needs two - one per pool mode, since PgBouncer's `pool_mode` is one
+setting per instance) increments sequentially from there (`6323`, `6324`,
+...) rather than jumping to a new `NN`-suffix block, since multiple
+PgBouncer instances in one lab is a lab-specific need, not a second
+Postgres node.
+
 ## Phase 1 - PostgreSQL and Drizzle Foundations
 
 - [x] 01 - postgres-drizzle-foundation - Docker Compose + Postgres + PGweb + Drizzle + seed + raw SQL alongside Drizzle. Domain: payroll (companies, employees). Ports 5401/8401.
@@ -49,7 +57,7 @@ own README and `.env.example` are the source of truth for its actual ports.
 
 ## Phase 6 - Connections and PostgreSQL Scaling
 
-- [ ] 23 - connection-management-and-pgbouncer
+- [x] 23 - connection-management-and-pgbouncer - direct-connection exhaustion reproduced against a deliberately-lowered `max_connections=30` (50 concurrent direct connections: 29 succeeded, 21 real `SQLSTATE 53300` rejections, 364ms) vs the same style of burst multiplexed through a transaction-pooling PgBouncer instance (60 concurrent clients, all succeeded, peak real Postgres backends measured via `pg_stat_activity` never exceeded `default_pool_size=10`); two PgBouncer instances (`pgbouncer-session`/`pgbouncer-transaction`, ports 6323/6324 - see the port-convention note above) since `pool_mode` is one setting per instance; session-state incompatibility demonstrated with a custom GUC, a temp table, and a prepared statement (session pooling preserved 5/5 trials, transaction pooling 0/5, each backed by a real, distinct Postgres error) - `SET application_name` was tried first and found to be a bad marker, since PgBouncer tracks and replays it across backends in every pool mode; `default_pool_size` tuning measured directly (40 concurrent clients: pool size 2 took 1062ms, pool size 20 took 199ms). Domain: a fresh, minimal `widgets` table (id/public_id/name/value) - this lab is about connection/pooling mechanics, not data modeling. Ports 5423/8423, PgBouncer 6323/6324.
 - [ ] 24 - postgres-wal-and-replication-basics
 - [ ] 25 - primary-read-replica-routing
 - [ ] 26 - replication-lag-and-read-after-write
@@ -202,7 +210,17 @@ own README and `.env.example` are the source of truth for its actual ports.
   domains, same "small standalone table, the lesson is the mechanism"
   rationale as Lab 06's `counters`/Lab 11's `documents`; also adds a
   Redis service alongside Postgres/PGweb (`redis:7-alpine`, host port
-  6422), independent of Lab 21's own, separate Redis usage.
+  6422), independent of Lab 21's own, separate Redis usage, 23 a fresh,
+  minimal standalone `widgets` table (id/public_id/name/value) - not one
+  of SPEC.md 8.2's five named domains, same "small standalone table, the
+  lesson is the mechanism, not the data model" rationale as Lab 06's
+  `counters`/Lab 11's `documents`/Lab 15's `payments`/Lab 19's
+  `notifications`; seeded with Faker called directly in `src/seed/seed.ts`,
+  same reasoning as Labs 16/19. This lab is also the first to add
+  PgBouncer (`edoburu/pgbouncer`, two instances - one per pool mode, see
+  its README "Architecture" for why one instance can't do both) as one of
+  CLAUDE.md's explicitly-permitted pieces of additional infrastructure
+  beyond Postgres/PGweb.
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
