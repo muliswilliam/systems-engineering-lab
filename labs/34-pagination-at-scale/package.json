@@ -1,0 +1,37 @@
+{
+  "name": "lab-34-pagination-at-scale",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "seed": "tsx src/seed/seed.ts",
+    "scenario:offset": "tsx src/scenarios/offset-pagination.ts",
+    "scenario:keyset": "tsx src/scenarios/keyset-pagination.ts",
+    "scenario:correctness-bug": "tsx src/scenarios/offset-correctness-bug.ts",
+    "scenario:keyset-correctness": "tsx src/scenarios/keyset-correctness.ts",
+    "scenario:count-cost": "tsx src/scenarios/count-cost.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:reset": "docker compose down -v && docker compose up -d",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@labs/db-utils": "workspace:*",
+    "@labs/logging": "workspace:*",
+    "@faker-js/faker": "^9.3.0",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.4",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@labs/test-utils": "workspace:*",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.28.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
