@@ -1,0 +1,54 @@
+name: lab21-cache-aside-and-cache-stampede
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab21-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab21}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab21}
+      POSTGRES_DB: ${POSTGRES_DB:-lab21}
+    # log_statement=all makes every SQL statement visible in `docker compose
+    # logs postgres`, matching every other lab in this repo.
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "${POSTGRES_PORT:-5421}:5432"
+    volumes:
+      - lab21_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab21} -d ${POSTGRES_DB:-lab21}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab21-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab21}:${POSTGRES_PASSWORD:-lab21}@postgres:5432/${POSTGRES_DB:-lab21}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8421}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # This lab's one addition to the repo's usual Postgres+PGweb pair - see
+  # CLAUDE.md's Technology Defaults ("Redis for caching/distributed-lock
+  # labs"). No persistent volume: `docker compose down -v` must return this
+  # lab to a known state, and this lab's seed script also explicitly
+  # FLUSHDBs on every run so stale cached/leased/leftover keys from a
+  # previous run never leak into a fresh scenario or test run even without
+  # `-v`.
+  redis:
+    image: redis:7-alpine
+    container_name: lab21-redis
+    ports:
+      - "${REDIS_PORT:-6421}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  lab21_postgres_data:
