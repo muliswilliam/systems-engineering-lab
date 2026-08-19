@@ -1,0 +1,80 @@
+name: lab25-primary-read-replica-routing
+
+# Same two-node bitnami/postgresql primary/replica shape Lab 24 established
+# (see that lab's README "Architecture" for the full env-var-driven-setup
+# rationale) - reused here as-is because Lab 25 is NOT about how to stand up
+# replication, it's about how APPLICATION CODE should route reads/writes
+# once replication already exists. Independent of Lab 24: its own network
+# (Compose project name above), its own named volumes, its own ports, its
+# own database name.
+services:
+  primary:
+    image: bitnami/postgresql:latest
+    container_name: lab25-primary
+    environment:
+      POSTGRESQL_REPLICATION_MODE: master
+      POSTGRESQL_REPLICATION_USER: ${REPLICATION_USER:-repl_user}
+      POSTGRESQL_REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-repl_password}
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-lab25}
+      POSTGRESQL_DATABASE: ${POSTGRES_DB:-lab25}
+      POSTGRESQL_ENABLE_TLS: "no"
+    ports:
+      - "${PRIMARY_POSTGRES_PORT:-5425}:5432"
+    volumes:
+      - lab25_primary_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "${POSTGRES_DB:-lab25}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  replica:
+    image: bitnami/postgresql:latest
+    container_name: lab25-replica
+    environment:
+      POSTGRESQL_REPLICATION_MODE: slave
+      POSTGRESQL_REPLICATION_USER: ${REPLICATION_USER:-repl_user}
+      POSTGRESQL_REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-repl_password}
+      POSTGRESQL_MASTER_HOST: primary
+      POSTGRESQL_MASTER_PORT_NUMBER: "5432"
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-lab25}
+      POSTGRESQL_DATABASE: ${POSTGRES_DB:-lab25}
+      POSTGRESQL_ENABLE_TLS: "no"
+    ports:
+      - "${REPLICA_POSTGRES_PORT:-5525}:5432"
+    volumes:
+      - lab25_replica_data:/bitnami/postgresql
+    depends_on:
+      primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "${POSTGRES_DB:-lab25}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  pgweb-primary:
+    image: sosedoff/pgweb
+    container_name: lab25-pgweb-primary
+    environment:
+      PGWEB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-lab25}@primary:5432/${POSTGRES_DB:-lab25}?sslmode=disable
+    ports:
+      - "${PRIMARY_PGWEB_PORT:-8425}:8081"
+    depends_on:
+      primary:
+        condition: service_healthy
+
+  pgweb-replica:
+    image: sosedoff/pgweb
+    container_name: lab25-pgweb-replica
+    environment:
+      PGWEB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-lab25}@replica:5432/${POSTGRES_DB:-lab25}?sslmode=disable
+    ports:
+      - "${REPLICA_PGWEB_PORT:-8525}:8081"
+    depends_on:
+      replica:
+        condition: service_healthy
+
+volumes:
+  lab25_primary_data:
+  lab25_replica_data:
