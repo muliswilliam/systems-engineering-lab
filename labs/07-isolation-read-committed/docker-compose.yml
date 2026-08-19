@@ -1,0 +1,37 @@
+name: lab07-isolation-read-committed
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab07-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab07}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab07}
+      POSTGRES_DB: ${POSTGRES_DB:-lab07}
+    # log_statement=all makes every SQL statement visible in `docker compose logs postgres`,
+    # which is how this lab shows the BEGIN/SET TRANSACTION ISOLATION LEVEL/COMMIT
+    # sequence each scenario actually sends.
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "${POSTGRES_PORT:-5407}:5432"
+    volumes:
+      - lab07_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab07} -d ${POSTGRES_DB:-lab07}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab07-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab07}:${POSTGRES_PASSWORD:-lab07}@postgres:5432/${POSTGRES_DB:-lab07}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8407}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab07_postgres_data:
