@@ -1,0 +1,40 @@
+{
+  "name": "lab-03-sql-querying-and-query-plans",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "seed": "tsx src/seed/seed.ts",
+    "demo:joins": "tsx src/scenarios/joins.ts",
+    "demo:aggregations": "tsx src/scenarios/aggregations.ts",
+    "demo:ctes": "tsx src/scenarios/ctes.ts",
+    "demo:window-functions": "tsx src/scenarios/window-functions.ts",
+    "demo:subqueries": "tsx src/scenarios/subqueries.ts",
+    "demo:explain": "tsx src/scenarios/explain-demo.ts",
+    "scenario:naive": "tsx src/scenarios/naive-report.ts",
+    "scenario:fixed": "tsx src/scenarios/corrected-report.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:reset": "docker compose down -v && docker compose up -d",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@labs/data-generators": "workspace:*",
+    "@labs/db-utils": "workspace:*",
+    "@labs/logging": "workspace:*",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.4",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@labs/test-utils": "workspace:*",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.28.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
