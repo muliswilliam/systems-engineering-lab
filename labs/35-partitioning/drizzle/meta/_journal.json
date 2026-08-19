@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1787146275919,
+      "tag": "0000_pink_warstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787146285196,
+      "tag": "0001_create_partitioned_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787146285597,
+      "tag": "0002_create_list_partition_demo",
+      "breakpoints": true
+    }
+  ]
+}

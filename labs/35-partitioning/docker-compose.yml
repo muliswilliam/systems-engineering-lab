@@ -1,0 +1,33 @@
+name: lab35-partitioning
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab35-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab35}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab35}
+      POSTGRES_DB: ${POSTGRES_DB:-lab35}
+    ports:
+      - "${POSTGRES_PORT:-5435}:5432"
+    volumes:
+      - lab35_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab35} -d ${POSTGRES_DB:-lab35}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab35-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab35}:${POSTGRES_PASSWORD:-lab35}@postgres:5432/${POSTGRES_DB:-lab35}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8435}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab35_postgres_data:
