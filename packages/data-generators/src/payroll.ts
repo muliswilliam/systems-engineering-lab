@@ -7,6 +7,8 @@ export interface GeneratedCompany {
   currency: string;
 }
 
+export type EmploymentStatus = "active" | "terminated";
+
 export interface GeneratedEmployee {
   publicId: string;
   companyIndex: number;
@@ -15,6 +17,15 @@ export interface GeneratedEmployee {
   role: "engineer" | "manager" | "designer" | "recruiter" | "sales";
   annualSalaryCents: number;
   currency: string;
+  /**
+   * Deterministic by position, not by an extra faker draw, so adding this
+   * field never shifts the faker call sequence that produces the other
+   * fields above (keeps every existing consumer's generated values stable).
+   * Roughly 1 in 7 employees is terminated - enough to exercise Lab 02's
+   * employment_status CHECK constraint and the "CHECK can't stop an invalid
+   * transition" exercise without dominating the dataset.
+   */
+  employmentStatus: EmploymentStatus;
 }
 
 const ROLE_SALARY_BAND_USD: Record<GeneratedEmployee["role"], [number, number]> = {
@@ -85,6 +96,7 @@ export function generateEmployees(
         role,
         annualSalaryCents: faker.number.int({ min, max }) * 100,
         currency: company.currency,
+        employmentStatus: i % 7 === 6 ? "terminated" : "active",
       });
     }
   });

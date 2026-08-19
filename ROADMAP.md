@@ -13,7 +13,7 @@ ports.
 ## Phase 1 - PostgreSQL and Drizzle Foundations
 
 - [x] 01 - postgres-drizzle-foundation - Docker Compose + Postgres + PGweb + Drizzle + seed + raw SQL alongside Drizzle. Domain: payroll (companies, employees). Ports 5401/8401.
-- [ ] 02 - relational-modeling-and-constraints
+- [x] 02 - relational-modeling-and-constraints - naive (raw-SQL, unconstrained) vs corrected (FK, UNIQUE, CHECK, NOT NULL) schemas, asserting exact Postgres error codes (23502/23503/23505/23514) and the CHECK-can't-stop-a-transition limit. Domain: payroll (companies, employees + employment_status). Ports 5402/8402.
 - [ ] 03 - sql-querying-and-query-plans
 - [ ] 04 - indexes-and-performance-basics
 
@@ -93,4 +93,4 @@ ports.
 - Shared packages grow incrementally: only what a given lab actually needs is
   added (e.g. `generateEvents`/`generateSeats` land with the ticketing labs,
   not before).
-- Domains by lab, so far: 01 payroll.
+- Domains by lab, so far: 01 payroll, 02 payroll.
