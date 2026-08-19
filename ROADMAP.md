@@ -29,7 +29,7 @@ ports.
 
 - [x] 10 - row-locks-and-select-for-update - naive plain-`SELECT`-then-absolute-`UPDATE` withdrawals lose one of two concurrent withdrawals (final balance $8,000 instead of the correct $5,000) even though `UPDATE`'s automatic row lock genuinely blocks the second writer for 263ms - blocking the write doesn't stop it overwriting with a stale-computed value; `SELECT ... FOR UPDATE` fixes it (final balance correctly $5,000, or the second withdrawal correctly rejected as insufficient funds) because the READ itself blocks (261ms observed) until the up-to-date balance is visible; also covers `NOWAIT` (instant SQLSTATE 55P03, 2ms) vs `SET LOCAL lock_timeout` (same SQLSTATE, aborts after ~504ms for a 500ms budget), `FOR SHARE` (concurrent readers, blocks writers), and verified against a real running Postgres that a plain `UPDATE` on a non-unique column takes `FOR NO KEY UPDATE` (2ms, does not conflict with a concurrent `FOR KEY SHARE`) while an `UPDATE` on a `UNIQUE` column takes full `FOR UPDATE` (255ms, blocks `FOR KEY SHARE`). Domain: banking/ledger, new minimal single-table `accounts` (independent of Labs 05's and 07's `accounts`). Ports 5410/8410.
 - [x] 11 - conditional-writes-and-optimistic-concurrency - naive plain `UPDATE ... WHERE id = ?` (no version check) reproduces a real lost update (both UPDATEs report `rowCount=1`, only the later write survives) vs `UPDATE ... WHERE id = ? AND version = ?` (first writer `rowCount=1`, stale second writer `rowCount=0`, app-level re-read-and-retry then succeeds and folds in both edits) vs a plain conditional write on a business column (`WHERE status = 'draft'`, exactly 1 of 10 concurrent "publish" attempts succeeds) - plus a short side-by-side comparison script measuring pessimistic `SELECT ... FOR UPDATE` blocking (~310ms real measured wait) against optimistic's immediate `rowCount=0`. Domain: a standalone `documents` table (a wiki-page-style shared draft, not one of SPEC.md's five named domains - same rationale as Lab 06's `counters`). Ports 5411/8411.
-- [ ] 12 - ticket-reservation-system
+- [x] 12 - ticket-reservation-system - naive read-then-write (SELECT status, check in app code, separate UPDATE, no transaction) vs conditional-write (`UPDATE ... WHERE status = 'AVAILABLE'`) vs row-lock (`SELECT ... FOR UPDATE`) seat reservation, each measured under 100 concurrent attempts for the same seat: naive reproducibly let 73-100 of 100 attempts believe they'd reserved the seat (real captured runs), both fixes reproducibly hit exactly 1; plus a conditional-UPDATE expiration worker (`RESERVED -> AVAILABLE` where `reserved_until < now()`) and a conditional-UPDATE payment completion (`RESERVED -> SOLD` requiring a valid, unexpired token). Domain: ticketing, new (`events` + a flat `seats` table - deliberately not SPEC.md's full venue/section/inventory model, see the lab's README "Architecture"). Ports 5412/8412.
 - [ ] 13 - advisory-locks
 
 ## Phase 4 - Background Work and Messaging
@@ -121,7 +121,13 @@ ports.
   not one of SPEC.md section 8.2's five named domains, same rationale as
   Lab 06's `counters`: the lesson is the conditional-write/version-column
   mechanism itself, and a rich relational model around it would only add
-  noise; defined only in Lab 11's own schema, not shared).
+  noise; defined only in Lab 11's own schema, not shared), 12 ticketing, new
+  (`events` + a flat `seats` table carrying its own `section`/`row`/
+  `seat_number` columns directly, rather than SPEC.md 8.2's full
+  aspirational venue/section/ticket-inventory/orders/payments model for the
+  domain - see Lab 12's README "Architecture" for the scoping rationale; a
+  reservation is modeled as the seat row's own state, not a separate
+  `reservations` table).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
@@ -150,3 +156,10 @@ ports.
   applies MVCC visibility and cannot show a dead tuple once its deleting
   transaction has committed, so `heap_page_items(get_raw_page(...))` is the
   only way to prove the old tuple version is still physically on disk.
+- `packages/data-generators/src/ticketing.ts` added (Lab 12) - deterministic
+  `generateEvents`/`generateSeats` generators for the new ticketing domain,
+  purely additive (a new file plus one new `export *` line in
+  `packages/data-generators/src/index.ts`) so every earlier lab's generators
+  and seeded datasets are untouched; Labs 01, 05, and 07 were re-validated
+  (`docker compose up -d` + `pnpm db:migrate` + `pnpm seed` + `pnpm typecheck`
+  + `pnpm test`, then stopped again) after this change and still pass.
