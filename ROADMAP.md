@@ -40,7 +40,7 @@ ports.
 - [ ] 17 - outbox-workers-skip-locked
 - [x] 18 - inbox-pattern-and-idempotent-consumers - a fresh, self-contained `accounts` + `processed_messages` schema (no import from Lab 17) demonstrating two distinct broken consumers and one fix, all consuming a simulated `CreditApplied` message (no real broker): a naive consumer with no dedup check at all double-applies a sequentially-redelivered message (real captured overcharge of exactly one credit amount, 2500 cents); a subtler check-then-insert consumer that DOES query `processed_messages` first but as a separate, non-atomic statement still double-applies the effect under real CONCURRENT redelivery (a deliberate 50ms delay between the check and the insert made the race reliably reproducible; one worker's bookkeeping INSERT visibly conflicts with a real Postgres 23505 unique_violation after its UPDATE has already committed - proving a dedup table's own integrity says nothing about the guarantee it was meant to provide); and the fix, `INSERT ... ON CONFLICT (message_id) DO NOTHING` plus the business-effect UPDATE inside one transaction, verified exactly-once under both sequential redelivery and real 10-way/20-way concurrent redelivery (captured `appliedCount: 1`, `duplicateCount: 9` and, in the test suite, 1/19 at 20-way concurrency, over separate real connections via `@labs/test-utils`'s `runConcurrently`). Domain: banking/ledger, a fifth independent `accounts` slice reusing the shared `generateAccounts` generator, plus a new `processed_messages` inbox table defined only in this lab. Ports 5418/8418.
 - [ ] 19 - message-delivery-semantics
-- [ ] 20 - sagas-and-distributed-workflows
+- [x] 20 - sagas-and-distributed-workflows - a fresh, self-contained order-lifecycle schema (`orders`, `inventory_items`, `inventory_reservations`, `payments`, `shipments`, plus a `saga_log` observability table) implementing the same four-step `CreateOrder -> ReserveInventory -> CapturePayment -> CreateShipment` workflow two ways against shared, mechanism-agnostic step functions: orchestration (one coordinator function calling every step and, on failure, every compensation in reverse order) and choreography (an in-process event bus, no coordinator, each of 4 named "services" reacting only to the event immediately before it, including a full reverse compensation chain `ShipmentFailed -> PaymentRefunded -> InventoryReleased -> OrderCancelled`); a forced `createShipment` failure after payment is captured triggers `refundPayment`/`releaseInventory`/`cancelOrder`, verified against real captured numbers (inventory count restored exactly, e.g. 90 -> 90 units, not just a status flag) and proven equivalent between both mechanisms; `saga_log` real captured counts for the identical business outcome show choreography needs measurably more indirection to trace (happy path 13 rows/4 actors vs. orchestration's 5 rows/0 named actors; failure-and-compensation 20 rows/4 actors vs. 7 rows/0 actors). No `@faker-js/faker` dependency - the inventory catalog is a small fixed 5-SKU list, not a generated one. Ports 5420/8420.
 
 ## Phase 5 - Caching and Distributed Coordination
 
@@ -159,7 +159,13 @@ ports.
   imported from Lab 05/07/08/10 - plus a new `processed_messages` inbox/
   dedup table, scenario-specific to Lab 18 and defined only in that lab's
   schema, not added to the shared package since it has no reusable shape
-  beyond this one lab's concept).
+  beyond this one lab's concept), 20 a fresh, self-contained order-lifecycle
+  domain (`orders`, `inventory_items`, `inventory_reservations`, `payments`,
+  `shipments`, `saga_log` - no import from Lab 16's `orders`/`outbox_events`
+  or any other lab's schema) seeded with a small fixed 5-SKU catalog rather
+  than a generated one, so no `@faker-js/faker` dependency was added for
+  this lab (a deliberate, documented deviation - see Lab 20's README
+  "Architecture").
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
