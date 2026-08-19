@@ -67,7 +67,7 @@ Postgres node.
 ## Phase 7 - Safe Schema Evolution
 
 - [x] 29 - safe-schema-migrations - a real, reproduced production incident (`ALTER TABLE ... RENAME COLUMN full_name TO display_name` against a throwaway copy of the table, then old application code's `SELECT full_name` fails immediately with a real captured SQLSTATE `42703`, "column \"full_name\" does not exist") vs. the expand/contract fix walked through as four genuinely distinct phases against the real `customers` table: (a) `ALTER TABLE ADD COLUMN display_name text` (nullable, no default) measured at 1.19ms regardless of table size; (b) a dual-write insert/update path that sets both columns together; (c) a batched, resumable backfill (200-row batches, 500 seeded rows backfilled in exactly 3 batches of 200/200/100, resumability proven by seeding a sentinel value a rerun must not overwrite); (d) a read-path switch proven correct for both a pre-existing (backfilled) row and a newly dual-written row in the same pass. Also covers a real measured contrast between a plain `CREATE INDEX` (blocked 1957ms behind a 2000ms-held write-locking transaction - the full duration) and `CREATE INDEX CONCURRENTLY` against the identical setup (an unrelated third-party write succeeded in 3ms while the concurrent build was still in flight, never blocked), plus `lock_timeout` (a real measured 1454ms indefinite block with no `lock_timeout` set vs. a real captured SQLSTATE `55P03`, "canceling statement due to lock timeout," failing in 507ms against a 500ms budget for the identical held lock). Domain: commerce-adjacent, a fresh, independent `customers` table (reusing the shape of the existing `generateCustomers` generator) - not imported from Lab 03/04's own `customers` table. Ports 5429/8429.
-- [ ] 30 - large-table-backfills
+- [x] 30 - large-table-backfills - a single unbatched `UPDATE orders SET loyalty_points = ... WHERE loyalty_points IS NULL` against a real 1,000,000-row table (took 5,456ms/5,595ms across two separate captured runs) blocked an ordinary, completely unrelated concurrent write to the exact same row for 97.3%/97.4% of that entire duration (5,309ms and 5,449ms respectively) - a real measured incident, not a theoretical one, since Postgres holds every row lock a statement takes until the WHOLE statement's transaction commits, not just while that row is being processed; a batched, resumable, rate-limited fix (1,000-row batches, 50ms pacing sleep between batches, `WHERE loyalty_points IS NULL` as the natural resumability predicate) backfilled the identical 1,000,000 rows in 64,214ms (slower in total - a deliberate, documented tradeoff) while an ordinary concurrent write to the same row measured across 303 samples over the whole run stayed at p50 10.81ms/p99 20.95ms/max 66.66ms against a 7.57ms baseline - roughly 80x less worst-case impact than the naive approach for the identical workload; resumability was proven with a REAL `SIGKILL` (not a caught exception) to a genuinely separate OS process mid-run (killed after committing 1,800 of 20,000 rows across 9 batches), then resuming the identical function in-process completed the remaining 18,200 rows in 159ms with the invariant `1,800 + 18,200 = 20,000` holding exactly - zero rows double-processed, zero skipped, zero left `NULL`; a real, documented implementation pitfall surfaced along the way and is called out in the README - spawning the child via `pnpm exec tsx ...` interposes a wrapper process that itself spawns a separate Node process, so `SIGKILL` to the wrapper left the real backfill process running as an undetected orphan, silently defeating the demo, until the spawn was changed to run `node --import tsx/esm <script>` directly (exactly one pid). A partial index (`idx_orders_loyalty_points_pending ON orders (id) WHERE loyalty_points IS NULL`) keeps the batched backfill's own selection query fast as the pending cohort shrinks. Domain: a fresh, standalone `orders` table (id/public_id/customer_email/amount_cents/status/created_at/loyalty_points) - not SPEC.md 8.2's full commerce model and not imported from Lab 16's or Lab 20's own `orders` tables, same "small standalone table, the lesson is the mechanism" rationale as Lab 06's `counters`/Lab 23's `widgets`; seeded via a local, batched/streamed (`unnest`-driven multi-row INSERT, 5,000 rows/batch) Faker generator directly in `src/seed/seed.ts` (no `@labs/data-generators` addition, same reasoning as Labs 16/19/23), supporting `--size=small\|medium\|large` (20,000/200,000/1,000,000 rows, seeded in 185ms/1.6s/8.6s respectively) and `--rows=N`. Ports 5430/8430.
 
 ## Phase 8 - PostgreSQL Operations and Performance
 
@@ -237,7 +237,16 @@ Postgres node.
   `generateCustomers` generator in `packages/data-generators/src/commerce.ts`
   - not imported from Lab 03/04's own `customers` table, per the
   independent-labs principle; `display_name` is added by this lab's own
-  migration 0001, not present in the shared generator's output.
+  migration 0001, not present in the shared generator's output, 30 a fresh,
+  standalone `orders` table (id/public_id/customer_email/amount_cents/
+  status/created_at/loyalty_points) - deliberately not SPEC.md 8.2's full
+  commerce model and not imported from Lab 16's or Lab 20's own `orders`
+  tables, same "small standalone table, the lesson is the mechanism"
+  rationale as Lab 06's `counters`/Lab 23's `widgets`; seeded with Faker
+  called directly in `src/seed/seed.ts` via a batched/streamed
+  `unnest`-driven multi-row INSERT (same reasoning as Labs 16/19/23 - no
+  `@labs/data-generators` addition for a shape with no second consumer
+  yet).
 - Lab 29 adds no new shared-package code and made no changes under
   `packages/` - it reuses the EXISTING `generateCustomers` generator as-is,
   so no other lab needed re-validation. The dangerous rename in
@@ -297,3 +306,11 @@ Postgres node.
   `PRIMARY_DATABASE_URL`; the replica never runs its own migration, per the
   lab's own point that a physical standby receives its schema via WAL
   replay, not a second `drizzle-kit` run.
+- Lab 30 adds no new shared-package code and made no changes under
+  `packages/`, so no other lab needed re-validation. `src/scenarios/
+  write-prober.ts` (a shared "ordinary concurrent write latency"
+  measurement helper used by all three of this lab's scenario scripts) is
+  lab-local rather than promoted to `@labs/test-utils`, since its
+  measurement technique - a fresh, short-lived `pg.Client` per attempt - is
+  specific to this lab's "simulate a stream of independent application
+  requests" scenario and has no second consumer yet.
