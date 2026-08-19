@@ -61,6 +61,6 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  log.error({ error }, "explain demo failed");
+  log.error({ err: error }, "explain demo failed");
   process.exit(1);
 });

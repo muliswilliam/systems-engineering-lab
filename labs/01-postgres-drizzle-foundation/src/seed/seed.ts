@@ -72,6 +72,6 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  log.error({ error }, "seed failed");
+  log.error({ err: error }, "seed failed");
   process.exit(1);
 });

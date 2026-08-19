@@ -110,6 +110,6 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  log.error({ error }, "joins demo failed");
+  log.error({ err: error }, "joins demo failed");
   process.exit(1);
 });

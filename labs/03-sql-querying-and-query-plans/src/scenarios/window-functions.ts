@@ -131,6 +131,6 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  log.error({ error }, "window-functions demo failed");
+  log.error({ err: error }, "window-functions demo failed");
   process.exit(1);
 });

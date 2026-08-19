@@ -98,7 +98,7 @@ async function main(): Promise<void> {
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
   main().catch((error: unknown) => {
-    log.error({ error }, "naive scenario failed");
+    log.error({ err: error }, "naive scenario failed");
     process.exit(1);
   });
 }

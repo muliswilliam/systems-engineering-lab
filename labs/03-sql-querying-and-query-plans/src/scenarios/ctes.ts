@@ -87,6 +87,6 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  log.error({ error }, "ctes demo failed");
+  log.error({ err: error }, "ctes demo failed");
   process.exit(1);
 });

@@ -53,6 +53,6 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  log.error({ error }, "raw-sql-demo failed");
+  log.error({ err: error }, "raw-sql-demo failed");
   process.exit(1);
 });

@@ -119,6 +119,6 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  log.error({ error }, "subqueries demo failed");
+  log.error({ err: error }, "subqueries demo failed");
   process.exit(1);
 });

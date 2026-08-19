@@ -92,6 +92,6 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  log.error({ error }, "aggregations demo failed");
+  log.error({ err: error }, "aggregations demo failed");
   process.exit(1);
 });

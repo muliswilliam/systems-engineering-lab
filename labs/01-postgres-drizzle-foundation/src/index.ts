@@ -19,6 +19,6 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  log.error({ error }, "dev failed");
+  log.error({ err: error }, "dev failed");
   process.exit(1);
 });

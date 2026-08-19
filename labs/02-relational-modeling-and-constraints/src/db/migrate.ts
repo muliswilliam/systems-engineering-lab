@@ -13,6 +13,6 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  log.error({ error }, "migration failed");
+  log.error({ err: error }, "migration failed");
   process.exit(1);
 });
