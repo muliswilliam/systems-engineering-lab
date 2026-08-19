@@ -1,0 +1,28 @@
+{
+  "name": "lab-37-retries-timeouts-and-circuit-breakers",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "scenario:naive-hang": "tsx src/scenarios/naive-hang.ts",
+    "scenario:retry-storm": "tsx src/scenarios/retry-storm.ts",
+    "scenario:timeout": "tsx src/scenarios/timeout-bounded.ts",
+    "scenario:backoff": "tsx src/scenarios/backoff-jitter.ts",
+    "scenario:idempotency": "tsx src/scenarios/idempotency-double-effect.ts",
+    "scenario:circuit-breaker": "tsx src/scenarios/circuit-breaker-trip.ts",
+    "scenario:composed": "tsx src/scenarios/composed.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@labs/logging": "workspace:*",
+    "@labs/test-utils": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
