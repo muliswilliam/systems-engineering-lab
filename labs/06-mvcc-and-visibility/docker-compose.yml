@@ -1,0 +1,37 @@
+name: lab06-mvcc-and-visibility
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab06-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab06}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab06}
+      POSTGRES_DB: ${POSTGRES_DB:-lab06}
+    # log_statement=all makes every SQL statement visible in `docker compose
+    # logs postgres`, including the exact BEGIN/COMMIT boundaries the
+    # two-session scenarios in this lab depend on.
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "${POSTGRES_PORT:-5406}:5432"
+    volumes:
+      - lab06_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab06} -d ${POSTGRES_DB:-lab06}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab06-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab06}:${POSTGRES_PASSWORD:-lab06}@postgres:5432/${POSTGRES_DB:-lab06}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8406}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab06_postgres_data:

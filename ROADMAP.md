@@ -20,7 +20,7 @@ ports.
 ## Phase 2 - Transactions and PostgreSQL Concurrency
 
 - [x] 05 - transactions-and-atomicity - naive (two independent, non-transactional `UPDATE`s) vs transactional (`BEGIN`/`COMMIT`/`ROLLBACK`) money transfer, with an injected failure at the identical point in both: the naive version leaves $10.00 vanished from the system total and a transfer row stuck at `status='pending'` forever; the transactional version's `ROLLBACK` leaves both account balances and the system total byte-for-byte unchanged. Domain: banking/ledger, new (`accounts` + `transfers`). Ports 5405/8405.
-- [ ] 06 - mvcc-and-visibility
+- [x] 06 - mvcc-and-visibility - two-independent-`pg.Client`-session scenarios (no shared Drizzle pool) proving real xmin/xmax/ctid tuple-versioning facts: no dirty reads, READ COMMITTED's per-statement (not per-transaction) snapshot, UPDATE producing a physically new tuple found via `pageinspect.heap_page_items` (a plain ctid-filtered SELECT can't see it once the deleting tx commits), and a plain SELECT (2ms) vs `SELECT ... FOR UPDATE` (~3000ms) not blocking vs blocking a concurrent writer. Domain: a minimal standalone `counters` table (not payroll/commerce - deliberately no relational noise around the one row being versioned). Ports 5406/8406.
 - [x] 07 - isolation-read-committed - two independent `pg.Client` connections drive raw `BEGIN`/`SET TRANSACTION ISOLATION LEVEL`/`COMMIT` to reproduce a non-repeatable read under the default Read Committed level (same still-open transaction, two SELECTs of the same row, a committed UPDATE in between returns a different value each time) and to prove Postgres never exposes a dirty read even when a transaction explicitly requests `READ UNCOMMITTED` - plus a direct A/B comparison showing `READ UNCOMMITTED` and `READ COMMITTED` produce byte-for-byte identical read behavior even though `SHOW transaction_isolation` echoes back whichever label was requested. Domain: banking/ledger (a single `accounts` table). Ports 5407/8407.
 - [ ] 08 - repeatable-read-and-snapshots
 - [ ] 09 - serializable-and-retries
@@ -94,11 +94,15 @@ ports.
   added (e.g. `generateEvents`/`generateSeats` land with the ticketing labs,
   not before).
 - Domains by lab, so far: 01 payroll, 02 payroll, 03 commerce, 04 commerce,
-  05 banking/ledger (`accounts` + `transfers` audit trail), 07 banking/ledger
-  (a minimal single-table `accounts` slice - no `transfers`/`ledger_entries`
-  table, since Lab 07 is about isolation semantics, not a rich relational
-  model; each lab defines its own schema independently per the
-  independent-labs principle, so the two `accounts` tables are not shared).
+  05 banking/ledger (`accounts` + `transfers` audit trail), 06 counters (a
+  deliberately minimal standalone domain - see Lab 06's README
+  "Architecture" for why a rich relational domain would have added noise
+  around the single-row tuple-versioning mechanics being taught), 07
+  banking/ledger (a minimal single-table `accounts` slice - no
+  `transfers`/`ledger_entries` table, since Lab 07 is about isolation
+  semantics, not a rich relational model; each lab defines its own schema
+  independently per the independent-labs principle, so the two `accounts`
+  tables are not shared).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
@@ -115,3 +119,15 @@ ports.
   trail of transfer attempts) is scenario-specific to Lab 05 and defined
   only in that lab's schema, per CLAUDE.md's guidance not to build
   speculative shared machinery ahead of a second consumer needing it.
+- Lab 06 introduces `src/db/session.ts` (`openSession`), the repo's first
+  two-independent-connection helper built on raw `pg.Client` rather than a
+  shared Drizzle pool - needed because a shared pool cannot guarantee a
+  specific transaction stays open on a specific connection while another
+  script/session does something else on a different one. Later concurrency
+  labs (07+) can reuse the same pattern. Lab 06 also uses the `pageinspect`
+  extension (`CREATE EXTENSION IF NOT EXISTS pageinspect`, run by the lab
+  itself, not a superuser-only migration step) to read raw heap page
+  contents directly - an ordinary `SELECT ... WHERE ctid = $1` still
+  applies MVCC visibility and cannot show a dead tuple once its deleting
+  transaction has committed, so `heap_page_items(get_raw_page(...))` is the
+  only way to prove the old tuple version is still physically on disk.
