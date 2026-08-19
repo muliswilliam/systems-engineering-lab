@@ -6,9 +6,10 @@ per the Definition of Done in `CLAUDE.md`).
 Port convention (avoids collisions if two labs are ever run at once): lab `NN`
 uses host port `54NN` for its primary Postgres and `84NN` for its primary
 PGweb. Labs with a second Postgres node (replication, capstone) use `55NN`
-and `85NN` for the second node, `56NN`/`86NN` for a third, and so on. Each
-lab's own README and `.env.example` are the source of truth for its actual
-ports.
+and `85NN` for the second node, `56NN`/`86NN` for a third, and so on. Labs
+that add Redis use `64NN` for their Redis port (Lab 22 uses `6422`; Lab 21
+establishes the same `64NN` convention concurrently). Each lab's own README
+and `.env.example` are the source of truth for its actual ports.
 
 ## Phase 1 - PostgreSQL and Drizzle Foundations
 
@@ -45,7 +46,7 @@ ports.
 ## Phase 5 - Caching and Distributed Coordination
 
 - [ ] 21 - cache-aside-and-cache-stampede
-- [ ] 22 - redis-leases-and-distributed-locks
+- [x] 22 - redis-leases-and-distributed-locks - a real Redis `SET NX PX` lock with an atomic Lua-script release (ownership token checked and deleted in one round trip, contrasted against a deliberately unsafe GET-then-DEL release that really does delete a different owner's lock after a real expiry-and-reacquire gap); the central bug (a 200ms-TTL lock held by a worker doing 400ms of unrenewed work) reproducibly lets a second worker acquire the "same" lock 261ms in and both workers write to a fresh `resource_state` table with real overlapping timestamps and zero errors raised (captured run: worker A writes at 401ms, worker B acquires at 261ms - genuine overlap); the fix (a Redis `INCR`-issued fencing token plus a Postgres conditional `UPDATE ... WHERE fencing_token < $1`, the same conditional-write pattern as Lab 11) replays the identical interleaving and rejects the stale worker's late write outright (`rowCount: 0`) even though that worker's own lock-holder logic never detected the expiry, while the newer, higher-token worker's write is accepted; a complementary heartbeat lease-renewal scenario shows renewal keeping a lock alive across 1000ms of work under a 200ms TTL via 16 real renewals, then shows its honest best-effort limit (a simulated 500ms GC-pause-style gap still lets a competitor steal the lock). Domain: a fresh, standalone `resource_state` table (id/public_id/name/fencing_token/last_writer/updated_at), not one of SPEC.md 8.2's five named domains - same "small standalone table, mechanism is the point" rationale as Lab 06's `counters`/Lab 11's `documents`/Lab 13's `payroll_runs`. Adds this repository's first Redis service (`redis:7-alpine`, health-checked via `redis-cli ping`) alongside Postgres/PGweb, independent of Lab 21's concurrent, separate Redis usage. Ports 5422/8422/6422 (Postgres/PGweb/Redis).
 
 ## Phase 6 - Connections and PostgreSQL Scaling
 
@@ -175,7 +176,14 @@ ports.
   closest conceptual synthesis, per the independent-labs principle; same
   "small standalone table, not a rich relational model" rationale as
   Lab 06's `counters`/Lab 11's `documents`/Lab 15's `payments`. Seeded with
-  Faker called directly in `src/seed/seed.ts`, same reasoning as Lab 16.
+  Faker called directly in `src/seed/seed.ts`, same reasoning as Lab 16),
+  22 a fresh, standalone `resource_state` table (id/public_id/name/
+  fencing_token/last_writer/updated_at) - again not one of SPEC.md 8.2's
+  five named domains, same "small standalone table, the lesson is the
+  mechanism" rationale as Lab 06's `counters`/Lab 11's `documents`/Lab 13's
+  `payroll_runs`; also this repository's first lab to add a Redis service
+  alongside Postgres/PGweb (`redis:7-alpine`, host port 6422), independent
+  of Lab 21's own, separate, concurrent Redis usage.
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
@@ -211,3 +219,9 @@ ports.
   and seeded datasets are untouched; Labs 01, 05, and 07 were re-validated
   (`docker compose up -d` + `pnpm db:migrate` + `pnpm seed` + `pnpm typecheck`
   + `pnpm test`, then stopped again) after this change and still pass.
+- Lab 22 adds no new shared-package code (`src/redis-lock/redis-client.ts`
+  is a small, lab-local Redis connection helper, not a shared package,
+  since no other lab depended on Redis before this one and Lab 21's
+  concurrent, independent Redis usage does not share any code with Lab
+  22's) - no changes were made to `packages/`, so no other lab needed
+  re-validation.

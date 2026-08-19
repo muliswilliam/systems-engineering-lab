@@ -1,0 +1,48 @@
+name: lab22-redis-leases-and-distributed-locks
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab22-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab22}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab22}
+      POSTGRES_DB: ${POSTGRES_DB:-lab22}
+    ports:
+      - "${POSTGRES_PORT:-5422}:5432"
+    volumes:
+      - lab22_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab22} -d ${POSTGRES_DB:-lab22}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: lab22-redis
+    # No AOF/RDB persistence needed - this lab's Redis state (lock keys,
+    # fencing counters) is scenario/test scratch state, reset by
+    # src/seed/seed.ts on every run, not data worth surviving a restart.
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    ports:
+      - "${REDIS_PORT:-6422}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab22-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab22}:${POSTGRES_PASSWORD:-lab22}@postgres:5432/${POSTGRES_DB:-lab22}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8422}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab22_postgres_data:
