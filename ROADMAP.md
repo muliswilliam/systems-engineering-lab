@@ -29,7 +29,7 @@ ports.
 
 - [ ] 10 - row-locks-and-select-for-update
 - [ ] 11 - conditional-writes-and-optimistic-concurrency
-- [ ] 12 - ticket-reservation-system
+- [x] 12 - ticket-reservation-system - naive read-then-write (SELECT status, check in app code, separate UPDATE, no transaction) vs conditional-write (`UPDATE ... WHERE status = 'AVAILABLE'`) vs row-lock (`SELECT ... FOR UPDATE`) seat reservation, each measured under 100 concurrent attempts for the same seat: naive reproducibly let 73-100 of 100 attempts believe they'd reserved the seat (real captured runs), both fixes reproducibly hit exactly 1; plus a conditional-UPDATE expiration worker (`RESERVED -> AVAILABLE` where `reserved_until < now()`) and a conditional-UPDATE payment completion (`RESERVED -> SOLD` requiring a valid, unexpired token). Domain: ticketing, new (`events` + a flat `seats` table - deliberately not SPEC.md's full venue/section/inventory model, see the lab's README "Architecture"). Ports 5412/8412.
 - [ ] 13 - advisory-locks
 
 ## Phase 4 - Background Work and Messaging
@@ -112,7 +112,12 @@ ports.
   `on_call_staff` table - `team`/`name`/`is_on_call` - reusing the same
   conceptual shape as Lab 08's write-skew preview per the independent-labs
   principle, to show Serializable catching the exact anomaly Repeatable
-  Read cannot).
+  Read cannot), 12 ticketing, new (`events` + a flat `seats` table carrying
+  its own `section`/`row`/`seat_number` columns directly, rather than
+  SPEC.md 8.2's full aspirational venue/section/ticket-inventory/orders/
+  payments model for the domain - see Lab 12's README "Architecture" for the
+  scoping rationale; a reservation is modeled as the seat row's own state,
+  not a separate `reservations` table).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
@@ -141,3 +146,10 @@ ports.
   applies MVCC visibility and cannot show a dead tuple once its deleting
   transaction has committed, so `heap_page_items(get_raw_page(...))` is the
   only way to prove the old tuple version is still physically on disk.
+- `packages/data-generators/src/ticketing.ts` added (Lab 12) - deterministic
+  `generateEvents`/`generateSeats` generators for the new ticketing domain,
+  purely additive (a new file plus one new `export *` line in
+  `packages/data-generators/src/index.ts`) so every earlier lab's generators
+  and seeded datasets are untouched; Labs 01, 05, and 07 were re-validated
+  (`docker compose up -d` + `pnpm db:migrate` + `pnpm seed` + `pnpm typecheck`
+  + `pnpm test`, then stopped again) after this change and still pass.

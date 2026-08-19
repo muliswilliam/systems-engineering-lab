@@ -1,0 +1,40 @@
+name: lab12-ticket-reservation-system
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab12-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab12}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab12}
+      POSTGRES_DB: ${POSTGRES_DB:-lab12}
+    # log_statement=all makes the conditional UPDATE / SELECT ... FOR UPDATE
+    # statements visible in `docker compose logs postgres`. max_connections is
+    # raised well above the default 100 because this lab's concurrency tests
+    # deliberately open one real connection per concurrent reservation
+    # attempt (up to 100+ at once) instead of funnelling them through a small
+    # shared pool, which would serialize the race we're trying to reproduce.
+    command: ["postgres", "-c", "log_statement=all", "-c", "max_connections=300"]
+    ports:
+      - "${POSTGRES_PORT:-5412}:5432"
+    volumes:
+      - lab12_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab12} -d ${POSTGRES_DB:-lab12}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab12-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab12}:${POSTGRES_PASSWORD:-lab12}@postgres:5432/${POSTGRES_DB:-lab12}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8412}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab12_postgres_data:
