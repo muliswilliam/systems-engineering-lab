@@ -1,0 +1,17 @@
+{
+  "name": "backend-systems-labs",
+  "private": true,
+  "version": "0.0.0",
+  "description": "A hands-on backend systems laboratory for practicing PostgreSQL concurrency, distributed messaging, caching, replication, reliability, and production engineering patterns using TypeScript and Drizzle.",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@11.18.0",
+  "scripts": {
+    "lab:list": "node tools/lab.mjs list",
+    "lab:start": "node tools/lab.mjs start",
+    "lab:stop": "node tools/lab.mjs stop",
+    "lab:reset": "node tools/lab.mjs reset",
+    "lab:test": "node tools/lab.mjs test"
+  }
+}
