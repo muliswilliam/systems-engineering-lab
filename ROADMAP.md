@@ -80,7 +80,7 @@ Postgres node.
 ## Phase 9 - Reliability Engineering
 
 - [ ] 36 - rate-limiting-and-backpressure
-- [ ] 37 - retries-timeouts-and-circuit-breakers
+- [x] 37 - retries-timeouts-and-circuit-breakers - a pure in-process TypeScript lab (no Docker Compose, no database - see the lab's README "Architecture" for why: retries/timeouts/circuit-breakers are client-side concerns, not datastore concerns) built around a real, seeded (`mulberry32`), deterministic-but-realistic `UnreliableDownstream` class with four health modes (`healthy`/`degraded`/`down-fail-fast`/`down-hang`) rather than a canned mock. The naive scenario reproduced two REAL, measured problems: a caller with no timeout blocked for `5002ms` against a downstream configured to hang for `5000ms` (`scenario:naive-hang`), and 50 concurrent callers each retrying up to 5 times with no backoff against a fully-down downstream produced exactly `250` real downstream calls in `124ms` wall clock (`scenario:retry-storm`, asserted as an exact count - not an approximation - in `tests/integration/retry-storm.test.ts`), with every one of those 250 calls failing anyway (zero successful requests bought for a 5x load multiplier). Adding `withTimeout(fn, 200)` against the identical 5000ms-hanging downstream measured a real p50/p99/max caller-observed latency of `202.0ms/203.0ms/203.0ms` - a real ~25x reduction in worst-case latency - while the README explicitly documents the caveat that `Promise.race` bounds only the CALLER's wait, not the downstream's own continued work (the abandoned 5000ms timer keeps running server-side, exactly the gap the idempotency scenario exploits). Exponential-backoff-with-full-jitter (`delay = random(0, min(maxDelayMs, baseDelayMs * 2^(attempt-1)))`) retried a downstream that failed 3 times then recovered, capturing real growing-but-non-identical delays of `7.3ms, 140.7ms, 361.1ms` across 3 attempts (ceiling doubling 100->200->400ms, actual delay randomized within each), and a companion sub-scenario proved a `NonTransientDownstreamError` is retried exactly 0 additional times (`ACTUAL downstream calls made: 1`) even with 4 attempts still available, making the "transient only" distinction a real, asserted behavior rather than a description. The idempotency scenario built a real, reproducible double-effect bug distinct from Lab 15's: `UnreliableDownstream.charge()` commits its ledger write immediately but delays its response 400-900ms, so a caller's own (reasonable) 150ms timeout raced ahead of a call that was already succeeding server-side - the naive retry (no reused key) produced a real captured `downstream ledger total: 2000 cents` / `charges applied downstream: 2` for one intended 1000-cent charge, while reusing a single idempotency key across the retry (the same mechanism Lab 15 implements with a Postgres `UNIQUE` constraint + `ON CONFLICT DO NOTHING`, here an in-process `Map` instead, with the README explicit that this substitution is fine pedagogically and NOT fine for production) kept the ledger at exactly `1000 cents`/`1` charge, with the retry's `chargeId` (`ch_1`) proven identical to the original. A real closed/open/half-open/closed-or-reopen `CircuitBreaker` state machine (injectable clock for deterministic unit tests, real cooldown sleeps in the scenario script) tripped OPEN on exactly the 5th consecutive failure (`downstream.totalCallCount` stayed at exactly `5` even after 8 total `execute()` calls - 3 were fast-failed), with a real measured latency contrast of `19-28ms` per call that actually reached the downstream vs. `0ms` (not merely fast - literally sub-millisecond, since OPEN never attempts the downstream at all) for every call after tripping; a HALF_OPEN probe after the real 300ms cooldown elapsed closed the breaker on success (exactly 1 downstream call made by the probe) and, in a second run, reopened it on a failed probe - every transition captured as a real structured Pino log line (`{"from":"CLOSED","to":"OPEN","reason":"failure threshold reached","consecutiveFailures":5}` etc.), not simulated. A composed scenario layered all three mechanisms in the order the README argues for - circuit breaker outermost, `retryWithBackoff` inside `breaker.execute()`, `withTimeout` inside each individual retry attempt - and measured the concrete payoff of that ordering during a sustained outage: the breaker tripped after exactly 4 FAILED `execute()` calls (each containing up to 3 internal retry attempts) rather than after 4 raw downstream failures, and once OPEN, 2 further `execute()` calls made ZERO downstream calls each, for a real total of `12` downstream calls made vs. the `18` a caller with no breaker at all would have made for the same 6 logical requests - a real, measured 33% reduction that grows without bound the longer an outage lasts. 31 tests across 7 files (4 unit, 3 integration) passed in a real captured ~5.6s run, `pnpm typecheck` passed with zero errors, and every one of the 7 `pnpm scenario:*` scripts plus `pnpm dev` was run directly and its real captured output verified during this lab's own validation - no Docker reset cycle applies (see "Architecture" for why). No new `@labs/*` shared-package code was added.
 
 ## Phase 10 - Observability and Security
 
@@ -328,7 +328,19 @@ Postgres node.
   granularity via a seeded Poisson-ish random walk (mean 2s interarrival,
   ~39% of consecutive events tying on the same second) specifically so
   `(created_at, id)` tuple ordering is a real, load-bearing necessity for a
-  stable sort order in this dataset, not a contrived edge case.
+  stable sort order in this dataset, not a contrived edge case. (Labs 35 and
+  36 were not yet complete at the time this note was written, so this list
+  continues at) 37: no relational domain at all - a pure in-process
+  TypeScript lab with no Postgres, Redis, or Docker Compose, since
+  retries/timeouts/circuit-breakers are client-side behavioral concerns, not
+  datastore concerns (see the lab's own README "Architecture" for the full
+  reasoning). Its one stand-in domain object is a seeded, deterministic,
+  in-process `UnreliableDownstream` class (four `health` modes -
+  `healthy`/`degraded`/`down-fail-fast`/`down-hang` - plus a `charge()`
+  method modeling a payment-processor-style call whose ledger write commits
+  before its slow response is sent), not a database table - flavor text for
+  a generic "downstream API call," per the task's own framing, rather than
+  one of SPEC.md 8.2's five named domains.
 - Lab 25 adds no new shared-package code either - it reuses `@labs/db-utils`'s
   `createPool`/`waitForDatabase` and `@labs/data-generators`'s EXISTING
   `generateProducts` as-is (the same generator Lab 21 already partially
@@ -528,3 +540,16 @@ Postgres node.
   inverse-CDF sampling from a seeded `Faker` instance, truncated to whole
   seconds) is also lab-local - it exists specifically to produce realistic
   `created_at` ties at scale, which no other lab's domain currently needs.
+- Lab 37 adds no new shared-package code and made no changes under
+  `packages/`, so no other lab needed re-validation - it does not even
+  depend on `@labs/db-utils` (no database exists in this lab at all). Its
+  three library modules (`src/lib/timeout.ts`, `src/lib/retry.ts`,
+  `src/lib/circuit-breaker.ts`) and its seeded `UnreliableDownstream`
+  (`src/downstream/unreliable-downstream.ts`) are kept lab-local rather than
+  promoted to a shared package, since no other lab currently needs
+  timeout/retry/circuit-breaker primitives - a natural promotion candidate
+  if a later lab (e.g. the Lab 40 capstone, which SPEC.md's own component
+  list implies will call multiple real subsystems) needs the same shape.
+  `@labs/test-utils`'s existing `runConcurrently` is reused as-is for the
+  retry-storm scenario's 50 concurrent callers, the same helper Labs
+  15/18/21 already use.
