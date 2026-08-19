@@ -45,7 +45,7 @@ own README and `.env.example` are the source of truth for its actual ports.
 ## Phase 5 - Caching and Distributed Coordination
 
 - [x] 21 - cache-aside-and-cache-stampede - naive GET/miss/compute/SET cache-aside reproduces a real cache stampede (a 300-concurrent-request cold-cache burst against one product key produced a real measured `databaseCallCount: 300`, i.e. one slow database call per concurrent miss) vs. four independent mitigations measured against the identical burst: in-process request coalescing (an in-flight-promise map collapsed the same 300-request burst to exactly 1 database call, real captured run), a Redis `SET key value NX PX` lease simulated across 5 independent `ioredis` connections as 5 "processes" (300 total requests across them, `databaseCallCount: 1`, consistent across reruns; tests assert `<=2` to document a narrow, deliberately-unresolved lease-expiry race), stale-while-revalidate (a request past the 300ms fresh window but within the 5000ms stale window returned in a real measured 4ms vs. naive cache-aside's ~79ms full-database-latency miss, with a deduplicated background refresh bringing the entry current), and jittered TTL (200 keys populated at the same instant with a fixed 2000ms TTL all expired within one 25ms poll tick of each other - a measured 0ms spread - vs. a real measured 801ms expiration spread for the same 200 keys with a +/-20% jittered TTL). First lab in the repo to add Redis (`redis:7-alpine`, health-checked via `redis-cli ping`, no persistent volume) alongside Postgres+PGweb, per CLAUDE.md's explicit "Redis for caching/distributed-lock labs" allowance. Domain: a fresh, minimal commerce-adjacent `products` table (id/public_id/name/price_cents only - see README "Architecture" for the scoping rationale), seeded via `@labs/data-generators`'s existing `generateProducts`. Ports 5421/8421/6421 (new `64NN` Redis port convention, mirroring the existing `54NN`/`84NN` pattern).
-- [ ] 22 - redis-leases-and-distributed-locks
+- [x] 22 - redis-leases-and-distributed-locks - a real Redis `SET NX PX` lock with an atomic Lua-script release (ownership token checked and deleted in one round trip, contrasted against a deliberately unsafe GET-then-DEL release that really does delete a different owner's lock after a real expiry-and-reacquire gap); the central bug (a 200ms-TTL lock held by a worker doing 400ms of unrenewed work) reproducibly lets a second worker acquire the "same" lock 261ms in and both workers write to a fresh `resource_state` table with real overlapping timestamps and zero errors raised (captured run: worker A writes at 401ms, worker B acquires at 261ms - genuine overlap); the fix (a Redis `INCR`-issued fencing token plus a Postgres conditional `UPDATE ... WHERE fencing_token < $1`, the same conditional-write pattern as Lab 11) replays the identical interleaving and rejects the stale worker's late write outright (`rowCount: 0`) even though that worker's own lock-holder logic never detected the expiry, while the newer, higher-token worker's write is accepted; a complementary heartbeat lease-renewal scenario shows renewal keeping a lock alive across 1000ms of work under a 200ms TTL via 16 real renewals, then shows its honest best-effort limit (a simulated 500ms GC-pause-style gap still lets a competitor steal the lock). Domain: a fresh, standalone `resource_state` table (id/public_id/name/fencing_token/last_writer/updated_at), same "small standalone table, mechanism is the point" rationale as Lab 06's `counters`/Lab 11's `documents`. Adds Redis (`redis:7-alpine`, health-checked via `redis-cli ping`) alongside Postgres/PGweb, independent of Lab 21's separate Redis usage. Ports 5422/8422/6422 (Postgres/PGweb/Redis).
 
 ## Phase 6 - Connections and PostgreSQL Scaling
 
@@ -196,7 +196,13 @@ own README and `.env.example` are the source of truth for its actual ports.
   (`createRedisClient`/`waitForRedis`) is a small helper LOCAL to Lab 21
   (`src/cache/redis-client.ts`), not a new shared package, since no second
   consumer exists yet (see that file's doc comment for the reasoning and
-  the note that Lab 22 is a natural future promotion point).
+  the note that Lab 22 is a natural future promotion point), 22 a fresh,
+  standalone `resource_state` table (id/public_id/name/fencing_token/
+  last_writer/updated_at) - again not one of SPEC.md 8.2's five named
+  domains, same "small standalone table, the lesson is the mechanism"
+  rationale as Lab 06's `counters`/Lab 11's `documents`; also adds a
+  Redis service alongside Postgres/PGweb (`redis:7-alpine`, host port
+  6422), independent of Lab 21's own, separate Redis usage.
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
@@ -232,3 +238,9 @@ own README and `.env.example` are the source of truth for its actual ports.
   and seeded datasets are untouched; Labs 01, 05, and 07 were re-validated
   (`docker compose up -d` + `pnpm db:migrate` + `pnpm seed` + `pnpm typecheck`
   + `pnpm test`, then stopped again) after this change and still pass.
+- Lab 22 adds no new shared-package code (`src/redis-lock/redis-client.ts`
+  is a small, lab-local Redis connection helper, not a shared package,
+  since no other lab depended on Redis before this one and Lab 21's
+  concurrent, independent Redis usage does not share any code with Lab
+  22's) - no changes were made to `packages/`, so no other lab needed
+  re-validation.
