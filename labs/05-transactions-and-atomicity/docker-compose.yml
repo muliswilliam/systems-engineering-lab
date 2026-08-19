@@ -1,0 +1,37 @@
+name: lab05-transactions-and-atomicity
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab05-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab05}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab05}
+      POSTGRES_DB: ${POSTGRES_DB:-lab05}
+    # log_statement=all makes BEGIN/COMMIT/ROLLBACK and every UPDATE visible
+    # in `docker compose logs postgres` - this lab is entirely about
+    # transaction boundaries, so seeing the literal statements matters.
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "${POSTGRES_PORT:-5405}:5432"
+    volumes:
+      - lab05_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab05} -d ${POSTGRES_DB:-lab05}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab05-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab05}:${POSTGRES_PASSWORD:-lab05}@postgres:5432/${POSTGRES_DB:-lab05}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8405}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab05_postgres_data:

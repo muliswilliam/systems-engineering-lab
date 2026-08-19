@@ -19,7 +19,7 @@ ports.
 
 ## Phase 2 - Transactions and PostgreSQL Concurrency
 
-- [ ] 05 - transactions-and-atomicity
+- [x] 05 - transactions-and-atomicity - naive (two independent, non-transactional `UPDATE`s) vs transactional (`BEGIN`/`COMMIT`/`ROLLBACK`) money transfer, with an injected failure at the identical point in both: the naive version leaves $10.00 vanished from the system total and a transfer row stuck at `status='pending'` forever; the transactional version's `ROLLBACK` leaves both account balances and the system total byte-for-byte unchanged. Domain: banking/ledger, new (`accounts` + `transfers`). Ports 5405/8405.
 - [ ] 06 - mvcc-and-visibility
 - [ ] 07 - isolation-read-committed
 - [ ] 08 - repeatable-read-and-snapshots
@@ -93,7 +93,7 @@ ports.
 - Shared packages grow incrementally: only what a given lab actually needs is
   added (e.g. `generateEvents`/`generateSeats` land with the ticketing labs,
   not before).
-- Domains by lab, so far: 01 payroll, 02 payroll, 03 commerce, 04 commerce.
+- Domains by lab, so far: 01 payroll, 02 payroll, 03 commerce, 04 commerce, 05 banking/ledger.
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
@@ -104,3 +104,9 @@ ports.
     `--size=large` scale to violate the `email` UNIQUE constraint
     otherwise; the fix is a no-op at small sizes, so Labs 01-03's existing
     seeded datasets are unaffected.
+- `packages/data-generators/src/ledger.ts` added (Lab 05) - a minimal
+  `generateAccounts` generator for the new banking/ledger domain. Only
+  `accounts` lives in the shared package; `transfers` (this lab's audit
+  trail of transfer attempts) is scenario-specific to Lab 05 and defined
+  only in that lab's schema, per CLAUDE.md's guidance not to build
+  speculative shared machinery ahead of a second consumer needing it.
