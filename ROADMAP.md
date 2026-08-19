@@ -89,7 +89,7 @@ Postgres node.
 
 ## Phase 11 - Capstone
 
-- [ ] 40 - production-capstone
+- [x] 40 - production-capstone - a genuinely working small ticketing/booking system (`events`/`seats`/`orders`/`outbox_events`/`notification_attempts`) composing five mechanisms taught standalone in earlier labs into one real, interacting pipeline: conditional-write seat reservation (Lab 11/12), a transaction spanning the order write + seat transition + outbox write (Lab 05/16), an idempotency key with `INSERT ... ON CONFLICT (idempotency_key) DO NOTHING RETURNING *` (Lab 15), `SELECT ... FOR UPDATE SKIP LOCKED` outbox claiming (Lab 14/17), and a circuit breaker (outermost) wrapping retry-with-backoff (inside) wrapping a per-attempt timeout (innermost) around a simulated notification downstream (Lab 37), plus a Redis token-bucket rate limiter at the checkout boundary (Lab 36). The system-level failure this capstone exists to demonstrate - one that neither Lab 15 nor Lab 37 alone would reproduce, since neither lab's own scenario combines a duplicate-order storm WITH a struggling downstream at the same time - was reproduced with real captured numbers: 20 concurrent duplicate checkout requests (modeling a client's HTTP layer retrying after a lost response, SPEC.md Lab 15's own motivating scenario) against a naive (no-idempotency) checkout handler produced a real `distinctOrdersInDb: 20`/`outboxEventsCreated: 20` for what should have been ONE purchase, and draining that outbox with a naive (no-breaker) worker against a `degraded` notification downstream made a real `notificationCallsMade: 45` to attempt notifying one customer 20 separate times, over a real `drainDurationMs: 9318`. The identical 20-way duplicate storm replayed against the composed/fixed system (idempotent checkout + protected worker), this time against a strictly harder fully-`down` downstream so the breaker's own contribution stays separately measurable, produced a real `newlyCreated: 1`/`duplicatesSuppressed: 19`/`distinctOrdersForStormSeat: 1` (idempotency's contribution, measured independently of the breaker) and, of 27 total outbox claim attempts across all events created in that run (the 1 storm event plus 8 from genuinely distinct concurrent legitimate customers), only `notificationCallsMade: 9` real calls ever reached the struggling downstream while `circuitOpenRejections: 24` were rejected locally in ~0ms once the breaker tripped OPEN (the breaker's contribution, measured independently of idempotency). A dedicated cross-cutting invariant test composes all of this into one assertion no single earlier lab's own test suite could express: 50 concurrent duplicate checkouts against a fully-down downstream still produce exactly 1 order, exactly 1 outbox event, and at most 9 real downstream calls (bounded by `maxAttempts=3` x up to 3 reclaim cycles) - a number that would be IDENTICAL whether 5 or 5,000 duplicates had arrived, because idempotency collapses them to one logical unit of work before the breaker's own bound ever comes into play. Two supporting scenarios reused earlier labs' own invariant-style assertions at capstone scale: a 100-concurrent-attempt seat-reservation race correctly produced exactly 1 `reserved`/99 `rejected` (Lab 12's mechanism), and a 120-request burst against a 100-capacity Redis token-bucket limiter produced the exact `allowed: 100, rejected: 20` split in 5ms (Lab 36's mechanism, reused fresh). 7 Vitest tests across 5 files passed in a real captured ~2.4s run; `pnpm typecheck` passed with zero errors; a complete `docker compose down -v` -> `up -d` -> migrate -> seed -> test cycle was re-verified working twice, PGweb confirmed reachable (HTTP 200), Redis confirmed healthy (`PONG`), and seeding confirmed idempotent (1 event/30 seats across two consecutive `pnpm seed` runs). Domain: a small ticketing/booking platform - deliberately not SPEC.md 8.2's full venue/section/inventory/payments model, since this capstone's lesson is composing mechanisms correctly, not modeling a rich domain; a fresh, independent schema sharing no code or state with any other lab, per the independent-labs principle (each composed mechanism is reimplemented fresh here from its own lab's CONCEPT, never imported). Ports 5440/8440 (Postgres/PGweb), Redis 6440, a hand-rolled Prometheus-text `/metrics` endpoint on 9440 (`pnpm dev`) - deliberately NOT `prom-client` or Lab 38's own metrics approach (a sibling, independently-built lab as of this writing), per the independent-labs principle and CLAUDE.md's "Dependencies" guidance to avoid a dependency for ~60 lines of counter/gauge logic whose mechanics this lab wants visible, not hidden.
 - [ ] 41 - system-design-drills
 
 ## Implementation notes
@@ -626,3 +626,24 @@ Postgres node.
   `@labs/test-utils`'s existing `runConcurrently` is reused as-is for the
   retry-storm scenario's 50 concurrent callers, the same helper Labs
   15/18/21 already use.
+- Lab 40 (production-capstone), domain: a small ticketing/booking platform
+  (`events`/`seats`/`orders`/`outbox_events`/`notification_attempts`) - not
+  one of SPEC.md 8.2's five general-purpose domains, deliberately smaller
+  than SPEC.md 8.2's own full ticketing model, since this capstone's lesson
+  is composing five mechanisms correctly (Labs 05/11/12/14/15/16/17/36/37),
+  not modeling a rich domain. Every composed mechanism is a fresh,
+  independent reimplementation of its own lab's CONCEPT (conditional-write
+  reservation, transactional-outbox write, `SKIP LOCKED` claiming,
+  idempotency-key `UNIQUE` constraint, timeout/retry/circuit-breaker,
+  Redis token-bucket rate limiting) - none of it imports another lab's
+  code, per the independent-labs principle. Lab 40 adds no new
+  shared-package code and made no changes under `packages/`, so no other
+  lab needed re-validation; it reuses `@labs/data-generators`/
+  `@labs/db-utils`/`@labs/logging`/`@labs/test-utils` as-is. Its
+  `src/lib/metrics.ts` is a deliberately hand-rolled ~60-line Prometheus-text
+  counter/gauge registry rather than `prom-client` or an import of Lab 38's
+  own (sibling, independently-built) metrics approach - both a
+  independent-labs-principle requirement and a deliberate CLAUDE.md
+  "Dependencies" choice, since this capstone wants what a counter/gauge
+  actually is to stay visible, not hidden behind a library. Ports
+  5440/8440/6440 (Postgres/PGweb/Redis), metrics server on 9440.

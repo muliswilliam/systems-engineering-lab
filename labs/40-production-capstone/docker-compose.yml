@@ -1,0 +1,58 @@
+name: lab40-production-capstone
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab40-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab40}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab40}
+      POSTGRES_DB: ${POSTGRES_DB:-lab40}
+    # log_statement=all makes every checkout/reservation/outbox-claim
+    # statement visible in `docker compose logs postgres`, matching every
+    # other lab in this repo - this capstone is still about observable
+    # Postgres behavior, not just application code.
+    # max_connections raised above Postgres's default 100: this lab's
+    # scenarios/tests open bursts of 100-200+ concurrent connections
+    # (duplicate-checkout storms, the seat-reservation race, the rate-limit
+    # burst) alongside PGweb's own connections - same reasoning as Lab 12's
+    # own docker-compose.yml.
+    command: ["postgres", "-c", "log_statement=all", "-c", "max_connections=300"]
+    ports:
+      - "${POSTGRES_PORT:-5440}:5432"
+    volumes:
+      - lab40_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab40} -d ${POSTGRES_DB:-lab40}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab40-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab40}:${POSTGRES_PASSWORD:-lab40}@postgres:5432/${POSTGRES_DB:-lab40}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8440}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Backs the token-bucket rate limiter at the checkout API boundary (Lab
+  # 36's pattern, reused fresh - see src/lib/rate-limiter.ts). No persistent
+  # volume: `docker compose down -v` must return this lab to a known state,
+  # and the seed script also FLUSHDBs on every run.
+  redis:
+    image: redis:7-alpine
+    container_name: lab40-redis
+    ports:
+      - "${REDIS_PORT:-6440}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  lab40_postgres_data:
