@@ -1,0 +1,42 @@
+name: lab30-large-table-backfills
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab30-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab30}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab30}
+      POSTGRES_DB: ${POSTGRES_DB:-lab30}
+    # log_lock_waits=on makes Postgres itself log when a backend has been
+    # waiting on a lock for longer than deadlock_timeout - useful while the
+    # naive giant UPDATE scenario is holding row locks. log_statement is left
+    # at its default (not "all") because this lab's naive scenario inserts/
+    # updates hundreds of thousands to a million rows - logging every
+    # statement would flood the container logs for no benefit (contrast with
+    # Lab 29, whose dataset is small enough that full statement logging is
+    # actually useful).
+    command: ["postgres", "-c", "log_lock_waits=on"]
+    ports:
+      - "${POSTGRES_PORT:-5430}:5432"
+    volumes:
+      - lab30_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab30} -d ${POSTGRES_DB:-lab30}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab30-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab30}:${POSTGRES_PASSWORD:-lab30}@postgres:5432/${POSTGRES_DB:-lab30}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8430}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab30_postgres_data:
