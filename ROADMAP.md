@@ -23,7 +23,7 @@ ports.
 - [x] 06 - mvcc-and-visibility - two-independent-`pg.Client`-session scenarios (no shared Drizzle pool) proving real xmin/xmax/ctid tuple-versioning facts: no dirty reads, READ COMMITTED's per-statement (not per-transaction) snapshot, UPDATE producing a physically new tuple found via `pageinspect.heap_page_items` (a plain ctid-filtered SELECT can't see it once the deleting tx commits), and a plain SELECT (2ms) vs `SELECT ... FOR UPDATE` (~3000ms) not blocking vs blocking a concurrent writer. Domain: a minimal standalone `counters` table (not payroll/commerce - deliberately no relational noise around the one row being versioned). Ports 5406/8406.
 - [x] 07 - isolation-read-committed - two independent `pg.Client` connections drive raw `BEGIN`/`SET TRANSACTION ISOLATION LEVEL`/`COMMIT` to reproduce a non-repeatable read under the default Read Committed level (same still-open transaction, two SELECTs of the same row, a committed UPDATE in between returns a different value each time) and to prove Postgres never exposes a dirty read even when a transaction explicitly requests `READ UNCOMMITTED` - plus a direct A/B comparison showing `READ UNCOMMITTED` and `READ COMMITTED` produce byte-for-byte identical read behavior even though `SHOW transaction_isolation` echoes back whichever label was requested. Domain: banking/ledger (a single `accounts` table). Ports 5407/8407.
 - [x] 08 - repeatable-read-and-snapshots - the same non-repeatable-read setup from Lab 07 replayed under `REPEATABLE READ` (one snapshot per transaction, so the second read now returns the stale pre-update value, contrasted in the same test file against a `READ COMMITTED` run of the identical setup, self-contained - no import from Lab 07), a same-row concurrent-write scenario where two `REPEATABLE READ` transactions racing to `UPDATE` one row produce exactly one commit and one `SQLSTATE 40001` ("could not serialize access due to concurrent update"), and a write-skew scenario (the canonical Postgres-docs on-call-doctors example, domain: two `on_call_staff` rows with an "at least one on call" invariant) where both transactions commit successfully yet the invariant ends up violated - Repeatable Read has no same-row conflict to catch across two different rows. Domain: banking/ledger (a fresh, non-imported copy of Lab 07's `accounts` table) plus a small on-call-staff table for write skew. Ports 5408/8408.
-- [ ] 09 - serializable-and-retries
+- [x] 09 - serializable-and-retries - fresh, self-contained "on-call staff" schema (`on_call_staff`: team/name/is_on_call, no CHECK possible since the invariant spans rows) reproducing the same write-skew anomaly Lab 08 previews: two `pg.Client` transactions under REPEATABLE READ each independently see the other still on call and both commit "go off call", leaving 0 on call; the identical interleaving under SERIALIZABLE gets a real SQLSTATE 40001 abort on one side (invariant preserved at 1 on call); a bounded retry loop with randomized backoff re-reads fresh state per attempt and reaches a terminal outcome (one commit, one correctly-and-permanently-rejected go-off-call); a 5-way concurrent contention benchmark measured Serializable+retry needing 11 total attempts/6 real conflicts to reach the correct answer vs. 5 attempts/0 conflicts under Repeatable Read that left 0 staff on call (wrong answer, no abort cost). Domain: on-call staff, new. Ports 5409/8409.
 
 ## Phase 3 - Locks and Concurrency Control
 
@@ -108,8 +108,11 @@ ports.
   Postgres-docs write-skew domain - not one of SPEC.md section 8.2's five
   named domains, since write skew specifically needs a small,
   easy-to-reason-about cross-row invariant rather than a rich relational
-  model; Lab 09's Serializable lab is expected to reuse the same write-skew
-  shape to show Serializable catching what Repeatable Read cannot).
+  model), 09 on-call staff (its own fresh, independently-defined
+  `on_call_staff` table - `team`/`name`/`is_on_call` - reusing the same
+  conceptual shape as Lab 08's write-skew preview per the independent-labs
+  principle, to show Serializable catching the exact anomaly Repeatable
+  Read cannot).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
