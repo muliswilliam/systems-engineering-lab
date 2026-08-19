@@ -71,7 +71,7 @@ Postgres node.
 
 ## Phase 8 - PostgreSQL Operations and Performance
 
-- [ ] 31 - vacuum-autovacuum-and-bloat
+- [x] 31 - vacuum-autovacuum-and-bloat - 15 full-table `UPDATE` passes over a real 50,000-row table with `autovacuum_enabled = false` set on that table only grew it from a real measured 5.09MB to 80.86MB (15.87x) while `SELECT COUNT(*)` still correctly reported 50,000 live rows the entire time (`n_dead_tup` climbed to 748,276, matching 15 x 50,000 tuple versions); cloning the table's current live rows into a freshly-written `page_views_fresh` and running the identical `EXPLAIN (ANALYZE, BUFFERS) SELECT COUNT(*)` against both showed the bloated table touching 10,350 buffers against the fresh table's 704 - a real 14.7x more pages read for the identical logical result. The fix, both forms, real and measured: plain `VACUUM` dropped `n_dead_tup` from 1,596,808 to 15 while `pg_relation_size` stayed at exactly 169.75MB (unchanged, since plain VACUUM marks space reusable rather than returning it to the OS) with 15 concurrent probe connections seeing a worst-case latency of only 24.81ms against its own 143.37ms duration; `VACUUM FULL` against the identical table genuinely shrank the file to 8.16MB (a real 20.79x reduction) but the same concurrent-write probes saw a worst case of 101.7ms against an 89.77ms `VACUUM FULL` duration (`vacuumFullBlockRatio: 1.133`) - a write queued when the `ACCESS EXCLUSIVE` lock was grabbed waited for essentially the entire operation. A separate, fully deterministic test (not wall-clock racing) proved the underlying lock-conflict mechanism directly: a transaction holding nothing but a `SELECT`'s `AccessShareLock` produced a real SQLSTATE `55P03` lock-timeout against a concurrent `VACUUM FULL` after ~150ms, while the identical held lock did not block a concurrent plain `VACUUM` at all. Autovacuum itself was proven to actually run, not just assumed: with `autovacuum_vacuum_scale_factor = 0`/`autovacuum_vacuum_threshold = 50` set per-table and `autovacuum_naptime = 2s` set instance-wide (this lab's own dedicated Postgres only), `pg_stat_user_tables.autovacuum_count` advanced from 0 to 1 and `n_dead_tup` dropped from 5,000 to 0 within a real measured 2.02 seconds, with zero `VACUUM` command run by hand. 7 tests across 4 files passed in a real captured 3.1-4.5s run across multiple full runs; a complete `docker compose down -v` -> `up -d` -> migrate -> seed -> test cycle was re-verified working, PGweb confirmed reachable (HTTP 200), and seeding confirmed idempotent (identical 5,000-row count across two consecutive `pnpm seed` runs). A real PostgreSQL observability gotcha was discovered and documented along the way: a single backend only flushes its own pending `pg_stat_user_tables` report at most once per ~1 second, so hammering many UPDATEs through one long-lived, reused connection left this lab's own dead/live tuple readings stale (briefly showing `n_live_tup` at double the real row count during development) - fixed by running every mutating statement on its own short-lived, explicitly-closed connection, plus an explicit `pg_stat_reset_single_table_counters` call right after each reseed's `TRUNCATE` for a synchronous, guaranteed-clean baseline. Domain: a fresh, standalone `page_views` table (id/public_id/slug/view_count/updated_at) - not one of SPEC.md 8.2's five named domains, same "small standalone table, the lesson is the mechanism" rationale as Lab 06's `counters`/Lab 30's `orders`; deliberately not Lab 06's own `counters` table despite the surface similarity, since this lab needs table-scale churn (thousands of rows, many passes) rather than single-tuple-scale `pageinspect` mechanics. Ports 5431/8431.
 - [ ] 32 - deadlocks-and-lock-debugging
 - [ ] 33 - query-tuning-and-explain-analyze
 - [ ] 34 - pagination-at-scale
@@ -291,7 +291,16 @@ Postgres node.
   `generateCustomers` generator in `packages/data-generators/src/commerce.ts`
   - not imported from Lab 03/04's own `customers` table, per the
   independent-labs principle; `display_name` is added by this lab's own
-  migration 0001, not present in the shared generator's output.
+  migration 0001, not present in the shared generator's output, 31 a fresh,
+  standalone `page_views` table (id/public_id/slug/view_count/updated_at) -
+  again not one of SPEC.md 8.2's five named domains, same "small standalone
+  table, the lesson is the mechanism" rationale as Lab 06's `counters`/
+  Lab 30's `orders`; deliberately built as its own schema rather than
+  reusing Lab 06's `counters` table despite the surface similarity, since
+  Lab 31 needs table-scale UPDATE churn (thousands of rows, many full-table
+  passes) to make physical size and `pg_stat_user_tables` dead-tuple counts
+  measurable, where Lab 06 deliberately uses a single hand-picked row for
+  `pageinspect`-level tuple-version inspection.
 - Lab 25 adds no new shared-package code either - it reuses `@labs/db-utils`'s
   `createPool`/`waitForDatabase` and `@labs/data-generators`'s EXISTING
   `generateProducts` as-is (the same generator Lab 21 already partially
@@ -407,3 +416,30 @@ Postgres node.
   measurement technique - a fresh, short-lived `pg.Client` per attempt - is
   specific to this lab's "simulate a stream of independent application
   requests" scenario and has no second consumer yet.
+- Lab 31 adds no new shared-package code and made no changes under
+  `packages/`, so no other lab needed re-validation - `src/scenarios/
+  write-prober.ts` and `create-bloat.ts` are rebuilt fresh and lab-local,
+  same "no second consumer yet" reasoning as Lab 30's own copy. This lab's
+  own real, worth-recording discovery: a single PostgreSQL backend only
+  flushes its own pending `pg_stat_user_tables` report to shared memory at
+  most once per ~1 second (and `TRUNCATE`'s stats reset goes through the
+  same pipeline) - repeatedly UPDATEing a table through one long-lived,
+  reused connection left `n_live_tup`/`n_dead_tup` readings stale and
+  briefly showing `n_live_tup` at double the real row count during this
+  lab's own development. The fix, used throughout every scenario and the
+  seed script: run each mutating statement (`UPDATE`, `VACUUM`, `VACUUM
+  FULL`, the seed's `TRUNCATE`+inserts, the query-performance comparison's
+  `CREATE TABLE ... AS SELECT`) on its own short-lived connection and
+  explicitly close it, which forces an immediate flush, plus an explicit
+  `pg_stat_reset_single_table_counters` call right after `TRUNCATE` for a
+  synchronous, guaranteed-clean baseline on every reseed. The interactive
+  `scenario:vacuum` script also needed `startConcurrentWriteProbers` (many
+  parallel probe connections rather than one sequential prober) to reliably
+  catch `VACUUM FULL`'s sub-100ms `ACCESS EXCLUSIVE` window in this lab's
+  container-local dataset sizes - a single sequential prober's own
+  connect/query/disconnect overhead made it too coarse to reliably land a
+  sample inside a lock window that short. The corresponding automated test
+  instead proves the same lock-conflict mechanism deterministically (a held
+  `AccessShareLock` plus `lock_timeout`, the same idiom Lab 29/30 use for
+  their own lock-blocking proofs), independent of dataset size or timing
+  luck.

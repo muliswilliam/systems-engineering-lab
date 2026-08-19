@@ -1,0 +1,55 @@
+name: lab31-vacuum-autovacuum-and-bloat
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab31-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab31}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab31}
+      POSTGRES_DB: ${POSTGRES_DB:-lab31}
+    # log_lock_waits=on: makes Postgres log when a backend has waited past
+    #   deadlock_timeout - visible while a concurrent probe write is blocked
+    #   behind VACUUM FULL's ACCESS EXCLUSIVE lock.
+    # log_autovacuum_min_duration=0: logs EVERY autovacuum run (worker start,
+    #   tuples removed, duration) regardless of how fast it is - without this,
+    #   autovacuum runs silently and the "autovacuum actually ran" scenario
+    #   would have nothing to show besides pg_stat_user_tables columns.
+    # autovacuum_naptime=2s: the autovacuum launcher's default wake-up
+    #   interval is 60s, which would make the autovacuum-recovery scenario
+    #   take up to a minute just waiting for the launcher to look at this
+    #   database at all. 2s keeps the demo on a human timescale while still
+    #   being a real, unmodified autovacuum - only the polling interval
+    #   changes, not the vacuum mechanism itself. This is instance-wide but
+    #   scoped to this lab's own dedicated Postgres container, so it does not
+    #   affect any other lab.
+    command:
+      [
+        "postgres",
+        "-c", "log_lock_waits=on",
+        "-c", "log_autovacuum_min_duration=0",
+        "-c", "autovacuum_naptime=2s",
+      ]
+    ports:
+      - "${POSTGRES_PORT:-5431}:5432"
+    volumes:
+      - lab31_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab31} -d ${POSTGRES_DB:-lab31}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab31-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab31}:${POSTGRES_PASSWORD:-lab31}@postgres:5432/${POSTGRES_DB:-lab31}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8431}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab31_postgres_data:
