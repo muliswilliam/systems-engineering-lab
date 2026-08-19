@@ -20,7 +20,7 @@ ports.
 ## Phase 2 - Transactions and PostgreSQL Concurrency
 
 - [ ] 05 - transactions-and-atomicity
-- [ ] 06 - mvcc-and-visibility
+- [x] 06 - mvcc-and-visibility - two-independent-`pg.Client`-session scenarios (no shared Drizzle pool) proving real xmin/xmax/ctid tuple-versioning facts: no dirty reads, READ COMMITTED's per-statement (not per-transaction) snapshot, UPDATE producing a physically new tuple found via `pageinspect.heap_page_items` (a plain ctid-filtered SELECT can't see it once the deleting tx commits), and a plain SELECT (2ms) vs `SELECT ... FOR UPDATE` (~3000ms) not blocking vs blocking a concurrent writer. Domain: a minimal standalone `counters` table (not payroll/commerce - deliberately no relational noise around the one row being versioned). Ports 5406/8406.
 - [ ] 07 - isolation-read-committed
 - [ ] 08 - repeatable-read-and-snapshots
 - [ ] 09 - serializable-and-retries
@@ -93,7 +93,11 @@ ports.
 - Shared packages grow incrementally: only what a given lab actually needs is
   added (e.g. `generateEvents`/`generateSeats` land with the ticketing labs,
   not before).
-- Domains by lab, so far: 01 payroll, 02 payroll, 03 commerce, 04 commerce.
+- Domains by lab, so far: 01 payroll, 02 payroll, 03 commerce, 04 commerce,
+  06 counters (a deliberately minimal standalone domain, not payroll/commerce -
+  see Lab 06's README "Architecture" for why a rich relational domain would
+  have added noise around the single-row tuple-versioning mechanics being
+  taught).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
@@ -104,3 +108,15 @@ ports.
     `--size=large` scale to violate the `email` UNIQUE constraint
     otherwise; the fix is a no-op at small sizes, so Labs 01-03's existing
     seeded datasets are unaffected.
+- Lab 06 introduces `src/db/session.ts` (`openSession`), the repo's first
+  two-independent-connection helper built on raw `pg.Client` rather than a
+  shared Drizzle pool - needed because a shared pool cannot guarantee a
+  specific transaction stays open on a specific connection while another
+  script/session does something else on a different one. Later concurrency
+  labs (07+) can reuse the same pattern. Lab 06 also uses the `pageinspect`
+  extension (`CREATE EXTENSION IF NOT EXISTS pageinspect`, run by the lab
+  itself, not a superuser-only migration step) to read raw heap page
+  contents directly - an ordinary `SELECT ... WHERE ctid = $1` still
+  applies MVCC visibility and cannot show a dead tuple once its deleting
+  transaction has committed, so `heap_page_items(get_raw_page(...))` is the
+  only way to prove the old tuple version is still physically on disk.
