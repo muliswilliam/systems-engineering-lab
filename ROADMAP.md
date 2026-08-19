@@ -19,7 +19,7 @@ ports.
 
 ## Phase 2 - Transactions and PostgreSQL Concurrency
 
-- [ ] 05 - transactions-and-atomicity
+- [x] 05 - transactions-and-atomicity - naive (two independent, non-transactional `UPDATE`s) vs transactional (`BEGIN`/`COMMIT`/`ROLLBACK`) money transfer, with an injected failure at the identical point in both: the naive version leaves $10.00 vanished from the system total and a transfer row stuck at `status='pending'` forever; the transactional version's `ROLLBACK` leaves both account balances and the system total byte-for-byte unchanged. Domain: banking/ledger, new (`accounts` + `transfers`). Ports 5405/8405.
 - [ ] 06 - mvcc-and-visibility
 - [x] 07 - isolation-read-committed - two independent `pg.Client` connections drive raw `BEGIN`/`SET TRANSACTION ISOLATION LEVEL`/`COMMIT` to reproduce a non-repeatable read under the default Read Committed level (same still-open transaction, two SELECTs of the same row, a committed UPDATE in between returns a different value each time) and to prove Postgres never exposes a dirty read even when a transaction explicitly requests `READ UNCOMMITTED` - plus a direct A/B comparison showing `READ UNCOMMITTED` and `READ COMMITTED` produce byte-for-byte identical read behavior even though `SHOW transaction_isolation` echoes back whichever label was requested. Domain: banking/ledger (a single `accounts` table). Ports 5407/8407.
 - [ ] 08 - repeatable-read-and-snapshots
@@ -94,11 +94,11 @@ ports.
   added (e.g. `generateEvents`/`generateSeats` land with the ticketing labs,
   not before).
 - Domains by lab, so far: 01 payroll, 02 payroll, 03 commerce, 04 commerce,
-  07 banking/ledger (a minimal single-table `accounts` slice - no
-  `transfers`/`ledger_entries` table yet, since Lab 07 is about isolation
-  semantics, not a rich relational model; a fuller ledger domain is expected
-  to land with Lab 09's Serializable lab, which needs a real multi-row
-  invariant).
+  05 banking/ledger (`accounts` + `transfers` audit trail), 07 banking/ledger
+  (a minimal single-table `accounts` slice - no `transfers`/`ledger_entries`
+  table, since Lab 07 is about isolation semantics, not a rich relational
+  model; each lab defines its own schema independently per the
+  independent-labs principle, so the two `accounts` tables are not shared).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
@@ -109,3 +109,9 @@ ports.
     `--size=large` scale to violate the `email` UNIQUE constraint
     otherwise; the fix is a no-op at small sizes, so Labs 01-03's existing
     seeded datasets are unaffected.
+- `packages/data-generators/src/ledger.ts` added (Lab 05) - a minimal
+  `generateAccounts` generator for the new banking/ledger domain. Only
+  `accounts` lives in the shared package; `transfers` (this lab's audit
+  trail of transfer attempts) is scenario-specific to Lab 05 and defined
+  only in that lab's schema, per CLAUDE.md's guidance not to build
+  speculative shared machinery ahead of a second consumer needing it.
