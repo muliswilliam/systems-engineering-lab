@@ -30,7 +30,7 @@ ports.
 - [x] 10 - row-locks-and-select-for-update - naive plain-`SELECT`-then-absolute-`UPDATE` withdrawals lose one of two concurrent withdrawals (final balance $8,000 instead of the correct $5,000) even though `UPDATE`'s automatic row lock genuinely blocks the second writer for 263ms - blocking the write doesn't stop it overwriting with a stale-computed value; `SELECT ... FOR UPDATE` fixes it (final balance correctly $5,000, or the second withdrawal correctly rejected as insufficient funds) because the READ itself blocks (261ms observed) until the up-to-date balance is visible; also covers `NOWAIT` (instant SQLSTATE 55P03, 2ms) vs `SET LOCAL lock_timeout` (same SQLSTATE, aborts after ~504ms for a 500ms budget), `FOR SHARE` (concurrent readers, blocks writers), and verified against a real running Postgres that a plain `UPDATE` on a non-unique column takes `FOR NO KEY UPDATE` (2ms, does not conflict with a concurrent `FOR KEY SHARE`) while an `UPDATE` on a `UNIQUE` column takes full `FOR UPDATE` (255ms, blocks `FOR KEY SHARE`). Domain: banking/ledger, new minimal single-table `accounts` (independent of Labs 05's and 07's `accounts`). Ports 5410/8410.
 - [x] 11 - conditional-writes-and-optimistic-concurrency - naive plain `UPDATE ... WHERE id = ?` (no version check) reproduces a real lost update (both UPDATEs report `rowCount=1`, only the later write survives) vs `UPDATE ... WHERE id = ? AND version = ?` (first writer `rowCount=1`, stale second writer `rowCount=0`, app-level re-read-and-retry then succeeds and folds in both edits) vs a plain conditional write on a business column (`WHERE status = 'draft'`, exactly 1 of 10 concurrent "publish" attempts succeeds) - plus a short side-by-side comparison script measuring pessimistic `SELECT ... FOR UPDATE` blocking (~310ms real measured wait) against optimistic's immediate `rowCount=0`. Domain: a standalone `documents` table (a wiki-page-style shared draft, not one of SPEC.md's five named domains - same rationale as Lab 06's `counters`). Ports 5411/8411.
 - [x] 12 - ticket-reservation-system - naive read-then-write (SELECT status, check in app code, separate UPDATE, no transaction) vs conditional-write (`UPDATE ... WHERE status = 'AVAILABLE'`) vs row-lock (`SELECT ... FOR UPDATE`) seat reservation, each measured under 100 concurrent attempts for the same seat: naive reproducibly let 73-100 of 100 attempts believe they'd reserved the seat (real captured runs), both fixes reproducibly hit exactly 1; plus a conditional-UPDATE expiration worker (`RESERVED -> AVAILABLE` where `reserved_until < now()`) and a conditional-UPDATE payment completion (`RESERVED -> SOLD` requiring a valid, unexpired token). Domain: ticketing, new (`events` + a flat `seats` table - deliberately not SPEC.md's full venue/section/inventory model, see the lab's README "Architecture"). Ports 5412/8412.
-- [ ] 13 - advisory-locks
+- [x] 13 - advisory-locks - session locks (`pg_advisory_lock`/`pg_try_advisory_lock`/`pg_advisory_unlock`) and transaction locks (`pg_advisory_xact_lock`/`pg_try_advisory_xact_lock`, no unlock function, released automatically on real captured COMMIT and ROLLBACK) proving per-key granularity (worker B's try-lock on a held key returns `false`, worker C's try-lock on a different key returns `true` immediately) and connection-loss release (closing a session's connection without calling `pg_advisory_unlock` frees the key for a new session); plus the CLAUDE.md-required demonstration that a connection which never calls any `pg_advisory_*` function can `UPDATE` the exact row a lock is "protecting" in 1ms, unimpeded - advisory locks coordinate cooperating callers only, they do not lock rows; and a numeric-internal-id vs. hashed-public-UUID lock-key comparison with real birthday-paradox collision-probability numbers (32-bit vs 64-bit key space). Domain: payroll, new independent copy (companies, employees, payroll_runs). Ports 5413/8413.
 
 ## Phase 4 - Background Work and Messaging
 
@@ -127,7 +127,17 @@ ports.
   aspirational venue/section/ticket-inventory/orders/payments model for the
   domain - see Lab 12's README "Architecture" for the scoping rationale; a
   reservation is modeled as the seat row's own state, not a separate
-  `reservations` table).
+  `reservations` table), 13 payroll (its own independent copy of the
+  companies/employees shape Lab 01 also uses, per the independent-labs
+  principle - no import from Lab 01/02 - plus a new `payroll_runs` table,
+  one row per company, that exists specifically to give the "advisory lock
+  does not protect rows" scenario a real row to update; scenario companies
+  are two fixed, named rows ("Scenario Company - Alpha (locked by Worker
+  A)" / "Scenario Company - Beta (different lock key)") looked up by name,
+  the same idempotent-reseed pattern Lab 07's `SCENARIO_ACCOUNTS`
+  established, rather than SPEC.md's illustrative literal ids 5/6 which
+  would not survive a reseed under this repository's delete-then-reinsert
+  seed convention).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
