@@ -1,0 +1,150 @@
+name: lab27-cascading-replicas
+
+# Same bitnami/postgresql shape Lab 24 established (see that lab's README.md
+# "Architecture" for the full rationale on POSTGRESQL_REPLICATION_MODE-driven
+# setup vs. hand-authoring pg_hba.conf/pg_basebackup) - extended here to a
+# THIRD node. The key difference from Lab 24/25/26's two-node topology:
+# replica-2's POSTGRESQL_MASTER_HOST points at replica-1, NOT at primary.
+# replica-2 never opens a connection to the primary at all - it streams WAL
+# from replica-1, which itself streams from the primary and re-forwards what
+# it receives. This is a genuine cascading replication topology, not a
+# simulation of one; bitnami/postgresql (like stock Postgres) allows any
+# standby with a configured replication user to itself act as the upstream
+# source for another standby, using the exact same wal_sender/wal_receiver
+# mechanism throughout the chain.
+#
+# depends_on is chained to match: primary -> replica-1 -> replica-2, so a
+# fresh `docker compose up -d` always brings the chain up in the correct
+# order (replica-2 must not attempt its initial base backup against
+# replica-1 before replica-1 itself has finished streaming from the primary
+# and become healthy).
+#
+# Fully independent of Labs 24/25/26 - own compose project name, container
+# names, network, volumes, and ports (54NN/84NN primary, 55NN/85NN
+# replica-1, 56NN/86NN replica-2, per ROADMAP.md's port-convention note).
+services:
+  primary:
+    image: bitnami/postgresql:latest
+    container_name: lab27-primary
+    environment:
+      POSTGRESQL_REPLICATION_MODE: master
+      POSTGRESQL_REPLICATION_USER: ${REPLICATION_USER:-repl_user}
+      POSTGRESQL_REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-repl_password}
+      # POSTGRESQL_USERNAME defaults to "postgres" - left unset so
+      # POSTGRESQL_PASSWORD sets the postgres SUPERUSER password directly.
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-lab27}
+      POSTGRESQL_DATABASE: ${POSTGRES_DB:-lab27}
+      POSTGRESQL_ENABLE_TLS: "no"
+    ports:
+      - "${PRIMARY_POSTGRES_PORT:-5427}:5432"
+    volumes:
+      - lab27_primary_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "${POSTGRES_DB:-lab27}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  replica-1:
+    image: bitnami/postgresql:latest
+    container_name: lab27-replica-1
+    environment:
+      POSTGRESQL_REPLICATION_MODE: slave
+      POSTGRESQL_REPLICATION_USER: ${REPLICATION_USER:-repl_user}
+      POSTGRESQL_REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-repl_password}
+      # replica-1's upstream is the PRIMARY - the first hop of the chain.
+      POSTGRESQL_MASTER_HOST: primary
+      POSTGRESQL_MASTER_PORT_NUMBER: "5432"
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-lab27}
+      POSTGRESQL_DATABASE: ${POSTGRES_DB:-lab27}
+      POSTGRESQL_ENABLE_TLS: "no"
+      # A real bitnami/postgresql limitation for cascading topologies:
+      # bitnami's entrypoint only appends a "host replication ..." pg_hba.conf
+      # entry for nodes in "master" mode, never for "slave" nodes - it
+      # assumes a slave is always a leaf. Without this override, replica-2's
+      # initial pg_basebackup against replica-1 is rejected outright
+      # (SQLSTATE-less libpq FATAL: "no pg_hba.conf entry for replication
+      # connection"). See config/replica1-pg_hba.conf for the full
+      # explanation and the exact error this fixes.
+      POSTGRESQL_USE_CUSTOM_PGHBA_INITIALIZATION: "yes"
+    ports:
+      - "${REPLICA1_POSTGRES_PORT:-5527}:5432"
+    volumes:
+      - lab27_replica1_data:/bitnami/postgresql
+      - ./config/replica1-pg_hba.conf:/bitnami/postgresql/conf/pg_hba.conf:ro
+    depends_on:
+      primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "${POSTGRES_DB:-lab27}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  replica-2:
+    image: bitnami/postgresql:latest
+    container_name: lab27-replica-2
+    environment:
+      POSTGRESQL_REPLICATION_MODE: slave
+      POSTGRESQL_REPLICATION_USER: ${REPLICATION_USER:-repl_user}
+      POSTGRESQL_REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-repl_password}
+      # The whole point of this lab: replica-2's upstream is REPLICA-1, not
+      # the primary. replica-2 never connects to the primary at all - the
+      # primary's own pg_stat_replication will only ever show one connected
+      # standby (replica-1), regardless of how many nodes hang off the chain
+      # below it. See src/scenarios/topology-and-fanout.ts.
+      POSTGRESQL_MASTER_HOST: replica-1
+      POSTGRESQL_MASTER_PORT_NUMBER: "5432"
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-lab27}
+      POSTGRESQL_DATABASE: ${POSTGRES_DB:-lab27}
+      POSTGRESQL_ENABLE_TLS: "no"
+    ports:
+      - "${REPLICA2_POSTGRES_PORT:-5627}:5432"
+    volumes:
+      - lab27_replica2_data:/bitnami/postgresql
+    depends_on:
+      replica-1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "${POSTGRES_DB:-lab27}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  pgweb-primary:
+    image: sosedoff/pgweb
+    container_name: lab27-pgweb-primary
+    environment:
+      PGWEB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-lab27}@primary:5432/${POSTGRES_DB:-lab27}?sslmode=disable
+    ports:
+      - "${PRIMARY_PGWEB_PORT:-8427}:8081"
+    depends_on:
+      primary:
+        condition: service_healthy
+
+  pgweb-replica-1:
+    image: sosedoff/pgweb
+    container_name: lab27-pgweb-replica-1
+    environment:
+      PGWEB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-lab27}@replica-1:5432/${POSTGRES_DB:-lab27}?sslmode=disable
+    ports:
+      - "${REPLICA1_PGWEB_PORT:-8527}:8081"
+    depends_on:
+      replica-1:
+        condition: service_healthy
+
+  pgweb-replica-2:
+    image: sosedoff/pgweb
+    container_name: lab27-pgweb-replica-2
+    environment:
+      PGWEB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-lab27}@replica-2:5432/${POSTGRES_DB:-lab27}?sslmode=disable
+    ports:
+      - "${REPLICA2_PGWEB_PORT:-8627}:8081"
+    depends_on:
+      replica-2:
+        condition: service_healthy
+
+volumes:
+  lab27_primary_data:
+  lab27_replica1_data:
+  lab27_replica2_data:
