@@ -1,0 +1,54 @@
+name: lab32-deadlocks-and-lock-debugging
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab32-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab32}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab32}
+      POSTGRES_DB: ${POSTGRES_DB:-lab32}
+    # log_lock_waits=on: makes Postgres log any backend that has waited past
+    #   deadlock_timeout for a lock - visible in `docker compose logs postgres`
+    #   during the naive scenario's forced deadlock.
+    # deadlock_timeout=300ms: the REAL interval Postgres's own deadlock
+    #   detector waits before it checks the wait-for graph for a cycle
+    #   (default 1s). Lowered here purely so this lab's demos/tests land on a
+    #   human timescale, the same "instance-wide, scoped only to this lab's
+    #   own dedicated container" tuning Lab 31 documents for its own
+    #   autovacuum_naptime - it changes how PROMPTLY Postgres checks, not
+    #   whether the detection or the resulting SQLSTATE 40P01 abort is real.
+    # max_connections=300: the "many concurrent trials" scenario/test opens
+    #   two real connections per trial pair (one per transfer leg) across many
+    #   independently-seeded account pairs at once - the default 100 is not
+    #   enough headroom once seed/migrate/pgweb connections are counted too.
+    command:
+      [
+        "postgres",
+        "-c", "log_lock_waits=on",
+        "-c", "deadlock_timeout=300ms",
+        "-c", "max_connections=300",
+      ]
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - lab32_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab32} -d ${POSTGRES_DB:-lab32}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab32-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab32}:${POSTGRES_PASSWORD:-lab32}@postgres:5432/${POSTGRES_DB:-lab32}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8432}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab32_postgres_data:
