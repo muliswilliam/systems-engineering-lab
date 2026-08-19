@@ -1,0 +1,38 @@
+name: lab09-serializable-and-retries
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab09-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab09}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab09}
+      POSTGRES_DB: ${POSTGRES_DB:-lab09}
+    # log_statement=all makes every SQL statement visible in `docker compose logs postgres`,
+    # which is how this lab shows the BEGIN/SET TRANSACTION ISOLATION LEVEL/COMMIT
+    # sequence each scenario actually sends, and lets you watch the exact moment
+    # Postgres returns SQLSTATE 40001 on a losing transaction's UPDATE or COMMIT.
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "${POSTGRES_PORT:-5409}:5432"
+    volumes:
+      - lab09_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab09} -d ${POSTGRES_DB:-lab09}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab09-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab09}:${POSTGRES_PASSWORD:-lab09}@postgres:5432/${POSTGRES_DB:-lab09}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8409}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab09_postgres_data:

@@ -23,7 +23,7 @@ ports.
 - [ ] 06 - mvcc-and-visibility
 - [x] 07 - isolation-read-committed - two independent `pg.Client` connections drive raw `BEGIN`/`SET TRANSACTION ISOLATION LEVEL`/`COMMIT` to reproduce a non-repeatable read under the default Read Committed level (same still-open transaction, two SELECTs of the same row, a committed UPDATE in between returns a different value each time) and to prove Postgres never exposes a dirty read even when a transaction explicitly requests `READ UNCOMMITTED` - plus a direct A/B comparison showing `READ UNCOMMITTED` and `READ COMMITTED` produce byte-for-byte identical read behavior even though `SHOW transaction_isolation` echoes back whichever label was requested. Domain: banking/ledger (a single `accounts` table). Ports 5407/8407.
 - [ ] 08 - repeatable-read-and-snapshots
-- [ ] 09 - serializable-and-retries
+- [x] 09 - serializable-and-retries - fresh, self-contained "on-call staff" schema (`on_call_staff`: team/name/is_on_call, no CHECK possible since the invariant spans rows) reproducing the same write-skew anomaly Lab 08 previews: two `pg.Client` transactions under REPEATABLE READ each independently see the other still on call and both commit "go off call", leaving 0 on call; the identical interleaving under SERIALIZABLE gets a real SQLSTATE 40001 abort on one side (invariant preserved at 1 on call); a bounded retry loop with randomized backoff re-reads fresh state per attempt and reaches a terminal outcome (one commit, one correctly-and-permanently-rejected go-off-call); a 5-way concurrent contention benchmark measured Serializable+retry needing 11 total attempts/6 real conflicts to reach the correct answer vs. 5 attempts/0 conflicts under Repeatable Read that left 0 staff on call (wrong answer, no abort cost). Domain: on-call staff, new. Ports 5409/8409.
 
 ## Phase 3 - Locks and Concurrency Control
 
@@ -98,7 +98,13 @@ ports.
   (a minimal single-table `accounts` slice - no `transfers`/`ledger_entries`
   table, since Lab 07 is about isolation semantics, not a rich relational
   model; each lab defines its own schema independently per the
-  independent-labs principle, so the two `accounts` tables are not shared).
+  independent-labs principle, so the two `accounts` tables are not shared),
+  09 on-call staff (new domain; a minimal single-table `on_call_staff` slice
+  - `team`/`name`/`is_on_call` - chosen because the lab's invariant
+  ("at least one on call per team") spans multiple rows and is the whole
+  point of the write-skew/Serializable demonstration; independently defined
+  from Lab 08's own on-call-flavored write-skew preview, per the
+  independent-labs principle).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
