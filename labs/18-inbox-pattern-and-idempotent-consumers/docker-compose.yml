@@ -1,0 +1,38 @@
+name: lab18-inbox-pattern-and-idempotent-consumers
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab18-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab18}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab18}
+      POSTGRES_DB: ${POSTGRES_DB:-lab18}
+    # log_statement=all makes the literal BEGIN/INSERT ... ON CONFLICT/UPDATE/
+    # COMMIT/ROLLBACK sequence visible in `docker compose logs postgres` - this
+    # lab is entirely about which statements are and are not inside the same
+    # transaction, so seeing the exact sequence matters.
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "${POSTGRES_PORT:-5418}:5432"
+    volumes:
+      - lab18_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab18} -d ${POSTGRES_DB:-lab18}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab18-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab18}:${POSTGRES_PASSWORD:-lab18}@postgres:5432/${POSTGRES_DB:-lab18}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8418}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab18_postgres_data:
