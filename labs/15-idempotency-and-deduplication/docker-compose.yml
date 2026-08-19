@@ -1,0 +1,37 @@
+name: lab15-idempotency-and-deduplication
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab15-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab15}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab15}
+      POSTGRES_DB: ${POSTGRES_DB:-lab15}
+    # log_statement=all makes the INSERT ... ON CONFLICT DO NOTHING RETURNING
+    # and the fallback SELECT both visible in `docker compose logs postgres` -
+    # this lab is entirely about which statement actually persisted a row.
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "${POSTGRES_PORT:-5415}:5432"
+    volumes:
+      - lab15_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab15} -d ${POSTGRES_DB:-lab15}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab15-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab15}:${POSTGRES_PASSWORD:-lab15}@postgres:5432/${POSTGRES_DB:-lab15}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8415}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab15_postgres_data:
