@@ -1,0 +1,13 @@
+# Real Prometheus scrape config for this lab's Node HTTP service, which runs
+# on the HOST via `pnpm dev` (this repo never containerizes a lab's own app
+# process). `host.docker.internal` is resolved via docker-compose.yml's
+# `extra_hosts: host-gateway` entry so this works on both Docker
+# Desktop (macOS/Windows) and native Linux Docker.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: "lab38-observability-service"
+    static_configs:
+      - targets: ["host.docker.internal:4438"]

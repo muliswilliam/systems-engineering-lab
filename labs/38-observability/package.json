@@ -1,0 +1,40 @@
+{
+  "name": "lab-38-observability",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/server/start.ts",
+    "seed": "tsx src/seed/seed.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:reset": "docker compose down -v && docker compose up -d",
+    "scenario:structured-logging": "tsx src/scenarios/structured-logging.ts",
+    "scenario:metrics": "tsx src/scenarios/metrics-scrape.ts",
+    "scenario:postgres-inspection": "tsx src/scenarios/postgres-inspection.ts",
+    "scenario:tracing": "tsx src/scenarios/correlation-tracing.ts",
+    "scenario:debug-narrative": "tsx src/scenarios/debug-narrative.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@labs/db-utils": "workspace:*",
+    "@labs/logging": "workspace:*",
+    "@faker-js/faker": "^9.3.0",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.4",
+    "pg": "^8.13.1",
+    "pino": "^9.5.0",
+    "pino-pretty": "^13.0.0",
+    "prom-client": "^15.1.3"
+  },
+  "devDependencies": {
+    "@labs/test-utils": "workspace:*",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.28.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
