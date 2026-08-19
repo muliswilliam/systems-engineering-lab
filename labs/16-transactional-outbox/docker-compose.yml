@@ -1,0 +1,38 @@
+name: lab16-transactional-outbox
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab16-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab16}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab16}
+      POSTGRES_DB: ${POSTGRES_DB:-lab16}
+    # log_statement=all makes the literal BEGIN/INSERT/COMMIT/ROLLBACK
+    # sequence visible in `docker compose logs postgres` - this lab is about
+    # exactly which statements happen atomically together, so seeing the raw
+    # statement log matters the same way it did in Lab 05.
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "${POSTGRES_PORT:-5416}:5432"
+    volumes:
+      - lab16_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab16} -d ${POSTGRES_DB:-lab16}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab16-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab16}:${POSTGRES_PASSWORD:-lab16}@postgres:5432/${POSTGRES_DB:-lab16}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8416}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab16_postgres_data:

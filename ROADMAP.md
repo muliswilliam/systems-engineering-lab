@@ -36,7 +36,7 @@ ports.
 
 - [x] 14 - job-queue-skip-locked - real 1/5/50-concurrent-worker draining of a shared `jobs` table via `SELECT ... FOR UPDATE SKIP LOCKED` (raw SQL, one claim transaction per job): 5 workers over 100 jobs each claimed exactly 20 (wall clock 71ms), 50 workers over 250 jobs each claimed exactly 5 with zero double-claims (wall clock 125ms; a fresh 200-job integration-test run measured 94ms); a `locked_until` lease lets a job whose worker never releases it (simulated crash) become reclaimable and completed by a different worker (measured reclaim latency 15ms past a 300ms lease); bounded retries via `attempts`/`max_attempts` move a job to a terminal `failed` status after 3 failed attempts and it is never claimed again; a real measured contrast (plain `FOR UPDATE` blocked a second worker for 312ms behind the first worker's lock vs. `SKIP LOCKED` resolving in 10ms by skipping to a different row) makes the naive-vs-fixed case concrete. No `workers` table - workers are ephemeral, identified only by a `worker_id` string on `job_attempts` (see README "Architecture" for why). Domain: background processing, new (`jobs` + `job_attempts`). Ports 5414/8414.
 - [x] 15 - idempotency-and-deduplication - a fresh, self-contained `payments` table (idempotency_key UNIQUE, nullable) where the naive scenario reproduces a real double charge (2 rows for one logical payment with no key, then 10 concurrent retries -> 10 rows even with a real UNIQUE constraint present, because each retry generates its own fresh key instead of reusing one) vs `INSERT ... ON CONFLICT (idempotency_key) DO NOTHING RETURNING *` + fallback `SELECT` producing exactly 1 row from 10 concurrent same-key retries, with every one of the 10 callers proven (not just row-counted) to receive an identical response; a third scenario extends the pattern to a non-deterministic computed result (a random confirmation code + fee), proving a retry gets back the ORIGINAL persisted value even though every one of 10 concurrent callers independently computed its own, different value first. Domain: a fresh, standalone `payments` table (not the full SPEC.md 8.2 commerce order/checkout model - the same "small standalone table" rationale as Lab 06's `counters`/Lab 11's `documents`). Ports 5415/8415.
-- [ ] 16 - transactional-outbox
+- [x] 16 - transactional-outbox - naive dual write reproduced in both directions (DB commits then simulated broker publish fails, leaving a durable order with zero recoverable `outbox_events` rows; simulated broker publish succeeds then the order INSERT is rejected by a real `orders_amount_cents_positive` CHECK violation (23514), leaving zero order rows despite the broker believing the event was sent) vs the fix (`BEGIN`; `INSERT order`; `INSERT outbox_event`; `COMMIT`), with a forced outbox-INSERT CHECK violation rolling back both rows together, plus a minimal one-shot (non-`SKIP LOCKED`, explicitly scoped as a Lab 17 preview) `drainOutbox` that publishes only `published_at IS NULL` rows and does not re-publish on a second run. Domain: a fresh, minimal commerce-adjacent schema, new (`orders` + `outbox_events` - deliberately not SPEC.md's full commerce model). Ports 5416/8416.
 - [ ] 17 - outbox-workers-skip-locked
 - [ ] 18 - inbox-pattern-and-idempotent-consumers
 - [ ] 19 - message-delivery-semantics
@@ -146,7 +146,13 @@ ports.
   table (idempotency keys/duplicate-charge protection, not SPEC.md 8.2's
   full commerce order/checkout model - same "small standalone table, not
   one of the five named domains" rationale as Lab 06's `counters` and
-  Lab 11's `documents`; defined only in Lab 15's own schema, not shared).
+  Lab 11's `documents`; defined only in Lab 15's own schema, not shared),
+  16 a fresh, minimal commerce-adjacent domain (`orders` + `outbox_events`,
+  deliberately not SPEC.md 8.2's full commerce model - see Lab 16's README
+  "Architecture" for the scoping rationale) seeded with Faker called
+  directly in `src/seed/seed.ts` rather than a new `@labs/data-generators`
+  file, since neither table is a generic reusable entity yet (same "no
+  speculative shared machinery" reasoning as Lab 05's `transfers`).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
