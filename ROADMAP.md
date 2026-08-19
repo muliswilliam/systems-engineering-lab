@@ -79,7 +79,7 @@ Postgres node.
 
 ## Phase 9 - Reliability Engineering
 
-- [ ] 36 - rate-limiting-and-backpressure
+- [x] 36 - rate-limiting-and-backpressure - framed deliberately at the APPLICATION layer, not Postgres-connection exhaustion (Lab 23's own subject, referenced rather than re-derived): a naive, unprotected endpoint forwarding every request straight to a real, in-process, finite-capacity, timeout-enforcing `BoundedResource` (capacity 10, 250ms latency, 1000ms acquire timeout - standing in for a slow downstream like a payment gateway) produced a real captured `succeeded: 40, failed: 160` out of 200 concurrent requests, exactly matching the theoretical max servable within the timeout budget, with real captured `Error` objects ("downstream acquire timed out after 1000ms..."), not simulated slowness. Two Redis-backed rate limiters, each a single atomic Lua script (per CLAUDE.md's "prefer datastore-native guarantees" applied to a counter instead of a row): token bucket (capacity 100, refill 100/sec) and sliding window log (window 1000ms, limit 100) both measured the EXACT `allowed: 100, rejected: 20` split from a 120-concurrent-request burst in 5ms, real and reproducible on every rerun (the exactness comes from Lua-script atomicity, not timing luck) - the literal "120 requests in 1 second against a 100/sec limit" scenario the task brief asked for. A bounded, Postgres-backed job queue (reusing Lab 14's `SELECT ... FOR UPDATE SKIP LOCKED` claiming pattern for consumption, capacity enforced via a Lab-11-style conditional `UPDATE queue_state SET pending_count = pending_count + 1 WHERE pending_count < capacity`) measured Phase 1's real `accepted: 20, rejected: 180` from a 200-concurrent-attempt burst against an idle capacity-20 queue, and Phase 2's real `maxObservedPendingCount: 20` held across 79 live-polled samples during 2 seconds of sustained pressure (`phase2Accepted: 62, phase2Rejected: 3016, processedByWorker: 82`) - contrasted against a naive unbounded in-process array queue that accepted all 5,000 pushed tasks with zero rejections and grew real, measured heap usage by 24.95MB (5,000 tasks * ~5KB of genuinely distinct `crypto.randomBytes`-sourced payload each - an earlier draft using `"x".repeat(n)` measured almost no heap growth at all, a real, documented gotcha: V8 represents a single-repeated-character string far more cheaply than realistic distinct payloads, understating the effect until random content was used instead), still 4,643-deep after a 2-second observation window with only 357 of 5,000 tasks drained. A dedicated "distinction" scenario proved rate limiting and backpressure are not substitutes: 20 requests sent at a generous 50/sec rate-limit budget produced `rateLimited: 0` (zero rejections - plenty of headroom) while a downstream with only 3 concurrent slots and 800ms latency still produced a real captured `downstreamTimedOut: 17` - the same 20 requests. This lab's own real, worth-documenting implementation bug, caught by its own validation run rather than assumed away: the bounded queue's original `enqueue` held one Postgres client checked out via `pool.connect()` and, on the capacity-full path, called `pool.query()` (a SECOND connection request from the same pool) before releasing the first - under the 200-concurrent-attempt Phase 1 burst this genuinely deadlocked the pool (every client checked out and waiting for a second one that would never come, ironic for a lab about protecting a service from overload); the fix re-uses the already-checked-out client for the fallback read instead of asking the pool for another one, documented in `bounded-queue.ts`'s own comment. 9 Vitest integration tests across 5 files passed in a real captured ~2.3s run (rate limiters use fixed, explicit timestamps rather than real sleeps for deterministic refill/window-expiry assertions, per CLAUDE.md's "assert invariants, not timing"); a complete `docker compose down -v` -> `up -d` -> migrate -> seed -> typecheck -> test cycle was re-verified working, PGweb confirmed reachable (HTTP 200), Redis confirmed healthy (`PONG`), and seeding confirmed idempotent (identical clear-and-reset state across two consecutive `pnpm seed` runs). No `--size`/`--rows` seed flags - this lab has no bulk realistic dataset, only generic protect-the-service mechanisms, per its own scoping (see README "Architecture"). Ports 5436/8436 (Postgres/PGweb, needed for the bounded job queue's real, durable, `SKIP LOCKED`-claimed capacity gate), Redis 6436 (needed for the two rate limiters' atomic Lua-script counters) - the first lab since 21/22 to combine Postgres+PGweb+Redis in one `docker-compose.yml`, deliberately: the two mechanisms have different natural homes (Redis for a tiny, extremely-high-frequency, non-durable counter; Postgres for "hand out work exactly once and never lose it") and this lab does not force either mechanism into the other's role (see README "Architecture" and "Tradeoffs" for why a Redis-backed queue or a Postgres-backed rate limiter would be a worse fit here).
 - [ ] 37 - retries-timeouts-and-circuit-breakers
 
 ## Phase 10 - Observability and Security
@@ -328,7 +328,25 @@ Postgres node.
   granularity via a seeded Poisson-ish random walk (mean 2s interarrival,
   ~39% of consecutive events tying on the same second) specifically so
   `(created_at, id)` tuple ordering is a real, load-bearing necessity for a
-  stable sort order in this dataset, not a contrived edge case.
+  stable sort order in this dataset, not a contrived edge case, 36 a fresh,
+  standalone domain modeling the "protect the service" MECHANISM directly
+  rather than a business domain (`jobs` + `queue_state` + `rate_limit_events`)
+  - not one of SPEC.md 8.2's five named domains, and deliberately not a rich
+  business domain at all, since this lab's own subject (per its README
+  "Architecture") is rate limiting and backpressure as generic mechanisms;
+  `jobs` reuses Lab 14's `FOR UPDATE SKIP LOCKED` claiming shape for
+  consumption only (no `attempts`/`locked_until` - Lab 36 does not re-derive
+  Lab 14's retry/lease machinery), and `queue_state`'s single-row capacity
+  gate applies Lab 11's conditional-write idiom to a capacity check instead
+  of a version column. Also the first lab since 21/22 to combine
+  Postgres+PGweb+Redis in one `docker-compose.yml`, deliberately: Redis backs
+  the two rate limiters' atomic Lua-script counters (a natural fit per
+  CLAUDE.md's "Redis for caching/distributed-lock labs" allowance, extended
+  here to rate-limiting counters) while Postgres backs the bounded job
+  queue's durable, exactly-once-claimed capacity gate - neither mechanism is
+  forced into the other's role (see the lab's own README "Tradeoffs" for why
+  a Redis-backed queue or a Postgres-backed rate limiter would be a worse fit
+  here).
 - Lab 25 adds no new shared-package code either - it reuses `@labs/db-utils`'s
   `createPool`/`waitForDatabase` and `@labs/data-generators`'s EXISTING
   `generateProducts` as-is (the same generator Lab 21 already partially
@@ -528,3 +546,32 @@ Postgres node.
   inverse-CDF sampling from a seeded `Faker` instance, truncated to whole
   seconds) is also lab-local - it exists specifically to produce realistic
   `created_at` ties at scale, which no other lab's domain currently needs.
+- Lab 36 adds no new shared-package code and made no changes under
+  `packages/`, so no other lab needed re-validation - it reuses the EXISTING
+  `@labs/db-utils`/`@labs/logging`/`@labs/test-utils` exports as-is.
+  `src/redis/redis-client.ts` is its own small, lab-local Redis connection
+  helper (`createRedisClient`/`waitForRedis`), a fresh copy in the same
+  spirit as Lab 21's and Lab 22's own independent copies, not imported from
+  either per the independent-labs principle. This lab's own real,
+  worth-recording discovery, caught by its own validation run rather than
+  assumed away: `src/backpressure/bounded-queue.ts`'s `enqueue` originally
+  held one Postgres client checked out via `pool.connect()` for its whole
+  transaction, and on the capacity-full path called `pool.query()` (a
+  SECOND, independent connection request from the same pool) for a fallback
+  read before releasing the first - under this lab's own Phase 1 burst
+  (200 concurrent `enqueue` calls against a capacity-20 queue, so the large
+  majority take the capacity-full path) this genuinely deadlocked the
+  connection pool: every client was checked out and waiting for a second
+  one that could never arrive, since nothing was left in the pool to hand
+  out. The fix re-uses the already-checked-out client for that fallback
+  read instead of asking the pool for a second connection - see that
+  function's own doc comment. A related, smaller finding also worth
+  recording: the naive-backpressure memory-growth scenario originally used
+  `"x".repeat(n)` to build each queued task's payload and measured almost no
+  real heap growth for 5,000 tasks at 50KB each - V8 represents a
+  single-repeated-character string far more cheaply than genuinely distinct
+  payload content, which understated the real effect this scenario exists
+  to demonstrate; switching to `crypto.randomBytes(...).toString("hex")` per
+  task (so every payload is genuinely distinct, not deduplicatable in any
+  way) produced the real, expected ~25MB heap growth for 5,000 tasks at
+  ~5KB each instead.

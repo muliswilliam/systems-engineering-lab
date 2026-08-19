@@ -1,0 +1,38 @@
+{
+  "name": "lab-36-rate-limiting-and-backpressure",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "seed": "tsx src/seed/seed.ts",
+    "scenario:naive-overload": "tsx src/scripts/run-naive-overload.ts",
+    "scenario:rate-limit-token-bucket": "tsx src/scripts/run-rate-limit-token-bucket.ts",
+    "scenario:rate-limit-sliding-window": "tsx src/scripts/run-rate-limit-sliding-window.ts",
+    "scenario:rate-limit-insufficient": "tsx src/scripts/run-rate-limit-insufficient.ts",
+    "scenario:backpressure-naive": "tsx src/scripts/run-backpressure-naive.ts",
+    "scenario:backpressure-bounded": "tsx src/scripts/run-backpressure-bounded.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:reset": "docker compose down -v && docker compose up -d",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@labs/db-utils": "workspace:*",
+    "@labs/logging": "workspace:*",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.4",
+    "ioredis": "^5.4.1",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@labs/test-utils": "workspace:*",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.28.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

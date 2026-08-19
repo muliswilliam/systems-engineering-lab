@@ -1,0 +1,55 @@
+name: lab36-rate-limiting-and-backpressure
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab36-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab36}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab36}
+      POSTGRES_DB: ${POSTGRES_DB:-lab36}
+    # log_statement=all makes every SQL statement visible in `docker compose
+    # logs postgres`, matching every other lab in this repo.
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "${POSTGRES_PORT:-5436}:5432"
+    volumes:
+      - lab36_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab36} -d ${POSTGRES_DB:-lab36}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab36-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab36}:${POSTGRES_PASSWORD:-lab36}@postgres:5432/${POSTGRES_DB:-lab36}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8436}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Backs the two rate limiters (token bucket + sliding window) via atomic
+  # Lua scripts - see CLAUDE.md's Technology Defaults ("Redis for
+  # caching/distributed-lock labs", which this repository also treats as
+  # covering rate-limiting counters, per the Distributed Locks section's
+  # instruction to prefer datastore-native guarantees while still allowing
+  # Redis where it is genuinely the concept being taught). No persistent
+  # volume: `docker compose down -v` must return this lab to a known state,
+  # and the seed script also explicitly FLUSHDBs on every run.
+  redis:
+    image: redis:7-alpine
+    container_name: lab36-redis
+    ports:
+      - "${REDIS_PORT:-6436}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  lab36_postgres_data:
