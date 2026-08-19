@@ -27,7 +27,7 @@ ports.
 
 ## Phase 3 - Locks and Concurrency Control
 
-- [ ] 10 - row-locks-and-select-for-update
+- [x] 10 - row-locks-and-select-for-update - naive plain-`SELECT`-then-absolute-`UPDATE` withdrawals lose one of two concurrent withdrawals (final balance $8,000 instead of the correct $5,000) even though `UPDATE`'s automatic row lock genuinely blocks the second writer for 263ms - blocking the write doesn't stop it overwriting with a stale-computed value; `SELECT ... FOR UPDATE` fixes it (final balance correctly $5,000, or the second withdrawal correctly rejected as insufficient funds) because the READ itself blocks (261ms observed) until the up-to-date balance is visible; also covers `NOWAIT` (instant SQLSTATE 55P03, 2ms) vs `SET LOCAL lock_timeout` (same SQLSTATE, aborts after ~504ms for a 500ms budget), `FOR SHARE` (concurrent readers, blocks writers), and verified against a real running Postgres that a plain `UPDATE` on a non-unique column takes `FOR NO KEY UPDATE` (2ms, does not conflict with a concurrent `FOR KEY SHARE`) while an `UPDATE` on a `UNIQUE` column takes full `FOR UPDATE` (255ms, blocks `FOR KEY SHARE`). Domain: banking/ledger, new minimal single-table `accounts` (independent of Labs 05's and 07's `accounts`). Ports 5410/8410.
 - [ ] 11 - conditional-writes-and-optimistic-concurrency
 - [ ] 12 - ticket-reservation-system
 - [ ] 13 - advisory-locks
@@ -102,7 +102,12 @@ ports.
   `transfers`/`ledger_entries` table, since Lab 07 is about isolation
   semantics, not a rich relational model; each lab defines its own schema
   independently per the independent-labs principle, so the two `accounts`
-  tables are not shared).
+  tables are not shared), 10 banking/ledger (a THIRD independent minimal
+  single-table `accounts` slice, seeded with named "Scenario Account - ..."
+  rows the way Lab 07's are - Lab 10 is about row-locking mechanics, not a
+  rich relational model, and per the independent-labs principle none of
+  Labs 05/07/10's three `accounts` tables are shared or imported between
+  labs).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers

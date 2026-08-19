@@ -1,0 +1,37 @@
+name: lab10-row-locks-and-select-for-update
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab10-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab10}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab10}
+      POSTGRES_DB: ${POSTGRES_DB:-lab10}
+    # log_statement=all makes every SQL statement visible in `docker compose logs postgres`,
+    # which is how this lab shows the exact BEGIN / SELECT ... FOR UPDATE / UPDATE / COMMIT
+    # sequence each scenario actually sends, interleaved between two connections.
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "${POSTGRES_PORT:-5410}:5432"
+    volumes:
+      - lab10_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab10} -d ${POSTGRES_DB:-lab10}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab10-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab10}:${POSTGRES_PASSWORD:-lab10}@postgres:5432/${POSTGRES_DB:-lab10}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8410}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab10_postgres_data:
