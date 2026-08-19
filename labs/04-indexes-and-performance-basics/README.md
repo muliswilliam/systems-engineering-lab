@@ -38,6 +38,10 @@ After this lab you should be able to:
   Postgres to use an index at all when the query applies a function to the
   column, and why a plain index on `email` cannot help a
   `WHERE lower(email) = ...` query;
+- read a full `EXPLAIN (ANALYZE, BUFFERS)` plan node by node - cost vs
+  actual time, estimated vs actual rows, `loops`, `Filter` vs `Index Cond`,
+  and `Buffers: shared hit`/`read` - not just spot the node type (see "How
+  to read EXPLAIN output" below);
 - explain index selectivity concretely: given the *actual* measured
   distribution of a column in this lab's own data, predict (and then
   verify) which values Postgres's planner will use an index for and which
@@ -45,6 +49,117 @@ After this lab you should be able to:
 - explain write amplification concretely, with a real measured number: how
   much slower a fixed batch of `INSERT`s becomes once the table has several
   indexes on it, in this lab's own data.
+
+## How to read EXPLAIN output
+
+Every scenario script here runs `EXPLAIN (ANALYZE, BUFFERS) <query>`
+(`src/scenarios/explain-utils.ts`) - not plain `EXPLAIN`. Plain `EXPLAIN`
+only shows the planner's *estimate*, without running the query. `ANALYZE`
+actually executes the query and reports what really happened; `BUFFERS`
+adds how many pages came from cache vs disk. The two captured below are
+real output from this lab's own database (seed 42, `--size=large`, same
+`orders` table, same `idx_orders_customer_id_placed_at` index used for Q1),
+one with the index available and one with it forced off - **read this
+section before "Break it"**, because the tables there compress each plan
+down to one line, and one line hides most of what you need to reason
+about a real plan.
+
+**Read the tree from the inside out, not top to bottom.** Indentation
+shows nesting: the most-indented (`->`) node at the bottom of a branch
+runs first and feeds rows up to the node above it. The top line is the
+last thing that happens and is what the client actually receives.
+
+Indexed version - `WHERE customer_id = 1301 ORDER BY placed_at DESC LIMIT 10`:
+
+```text
+Limit  (cost=0.42..26.86 rows=7 width=22) (actual time=0.038..0.080 rows=10 loops=1)
+  Buffers: shared hit=16
+  ->  Index Scan Backward using idx_orders_customer_id_placed_at on orders  (cost=0.42..26.86 rows=7 width=22) (actual time=0.037..0.078 rows=10 loops=1)
+        Index Cond: (customer_id = 1301)
+        Buffers: shared hit=16
+Planning Time: 0.486 ms
+Execution Time: 0.106 ms
+```
+
+Same query, same data, with `SET enable_indexscan = off; SET
+enable_bitmapscan = off;` first (this lab's own technique for forcing the
+"before" shape without dropping the index - see "Observe" below):
+
+```text
+Limit  (cost=6323.67..6324.37 rows=6 width=22) (actual time=7.400..10.014 rows=10 loops=1)
+  Buffers: shared hit=3626
+  ->  Gather Merge  (cost=6323.67..6324.37 rows=6 width=22) (actual time=7.399..10.011 rows=10 loops=1)
+        Workers Planned: 2
+        Workers Launched: 2
+        Buffers: shared hit=3626
+        ->  Sort  (cost=5323.64..5323.65 rows=3 width=22) (actual time=6.101..6.101 rows=8 loops=3)
+              Sort Key: placed_at DESC
+              Sort Method: top-N heapsort  Memory: 26kB
+              Buffers: shared hit=3626
+              ->  Parallel Seq Scan on orders  (cost=0.00..5323.62 rows=3 width=22) (actual time=3.180..6.035 rows=16 loops=3)
+                    Filter: (customer_id = 1301)
+                    Rows Removed by Filter: 113458
+                    Buffers: shared hit=3552
+Planning Time: 0.444 ms
+Execution Time: 10.055 ms
+```
+
+Field by field:
+
+- **`cost=0.42..26.86`**: the planner's *estimate*, in arbitrary internal
+  units (roughly "how many sequential page reads would this take"), not
+  milliseconds. The two numbers are startup cost (work before the first
+  row can be returned) and total cost (work for all rows). Compare costs
+  only to compare plans the planner is choosing between - never read a
+  cost number as a time.
+- **`actual time=0.037..0.078`**: real elapsed milliseconds from
+  `ANALYZE`, same startup/total shape as cost, but genuinely measured.
+  This is the number that matters for "is this fast."
+- **`rows=7` (in the cost parens) vs `rows=10` (in the actual parens)**:
+  estimated rows vs rows actually produced *by that node*. A close match
+  means the planner's statistics (from `ANALYZE`) are trustworthy for this
+  query; a wildly wrong estimate (10x, 100x off) is a common root cause
+  behind "why did Postgres pick a bad plan" and is worth chasing with
+  `ANALYZE <table>` before touching indexes at all.
+- **`loops=1` vs `loops=3`**: how many times this node executed. The
+  `Parallel Seq Scan` shows `loops=3` (the leader plus its 2 launched
+  workers) - its `actual time` and `rows` are *per loop*, so the real total
+  work is the reported `rows=16` multiplied across all 3, matching `Rows
+  Removed by Filter: 113458` (measured per-worker share of a ~340k-row
+  scan). This is the single most common misread of `EXPLAIN ANALYZE`
+  output: forgetting to account for `loops` on a parallel or nested-loop
+  node makes the real cost look smaller than it is.
+- **`Index Cond` vs `Filter`**: `Index Cond` (`customer_id = 1301`) is
+  applied *by the index itself* - Postgres never visits rows that don't
+  match. `Filter` (in the seq-scan plan, same condition) is applied *after*
+  reading every row from the table - Postgres reads all ~340k rows' worth
+  of that worker's share and then throws most of them away. `Rows Removed
+  by Filter: 113458` makes that waste a concrete, measured number instead
+  of an abstraction: 113,458 rows read and discarded, per worker loop,
+  just to keep 16.
+- **`Buffers: shared hit=16` vs `shared hit=3626`**: pages found in
+  Postgres's shared buffer cache (no disk I/O needed) touched by this node
+  and everything below it. `shared read=N` (not present in either plan
+  above - this whole dataset fits in cache on this machine) would mean
+  pages had to come from disk instead, which is far slower and exactly why
+  `BUFFERS` is worth including even when you only care about scan type: an
+  index scan touching 16 buffer pages vs a seq scan touching 3,626 is the
+  same story `execution time` tells, from a different angle (I/O, not
+  just CPU/time).
+- **`Sort Method: top-N heapsort`**: the seq-scan plan needs an explicit
+  `Sort` node because a sequential scan produces rows in physical table
+  order, not `placed_at` order; the index-scan plan needs no `Sort` node at
+  all because `idx_orders_customer_id_placed_at` is already physically
+  sorted by `(customer_id, placed_at)` and Postgres just walks it backward
+  (`Index Scan Backward`) - this is the composite-index benefit called out
+  in "Why the fix works" below, visible directly in the plan shape rather
+  than asserted.
+- **`Planning Time` vs `Execution Time`**: two separate clocks. Planning
+  Time is how long Postgres spent choosing this plan; Execution Time is
+  how long running the chosen plan took. For a query this cheap, planning
+  time (0.4-0.5 ms in both cases here) is *not* negligible relative to
+  execution time in the indexed case (0.106 ms) - worth remembering before
+  concluding a query is "as fast as it can be."
 
 ## Architecture
 
