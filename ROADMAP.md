@@ -66,7 +66,7 @@ Postgres node.
 
 ## Phase 7 - Safe Schema Evolution
 
-- [ ] 29 - safe-schema-migrations
+- [x] 29 - safe-schema-migrations - a real, reproduced production incident (`ALTER TABLE ... RENAME COLUMN full_name TO display_name` against a throwaway copy of the table, then old application code's `SELECT full_name` fails immediately with a real captured SQLSTATE `42703`, "column \"full_name\" does not exist") vs. the expand/contract fix walked through as four genuinely distinct phases against the real `customers` table: (a) `ALTER TABLE ADD COLUMN display_name text` (nullable, no default) measured at 1.19ms regardless of table size; (b) a dual-write insert/update path that sets both columns together; (c) a batched, resumable backfill (200-row batches, 500 seeded rows backfilled in exactly 3 batches of 200/200/100, resumability proven by seeding a sentinel value a rerun must not overwrite); (d) a read-path switch proven correct for both a pre-existing (backfilled) row and a newly dual-written row in the same pass. Also covers a real measured contrast between a plain `CREATE INDEX` (blocked 1957ms behind a 2000ms-held write-locking transaction - the full duration) and `CREATE INDEX CONCURRENTLY` against the identical setup (an unrelated third-party write succeeded in 3ms while the concurrent build was still in flight, never blocked), plus `lock_timeout` (a real measured 1454ms indefinite block with no `lock_timeout` set vs. a real captured SQLSTATE `55P03`, "canceling statement due to lock timeout," failing in 507ms against a 500ms budget for the identical held lock). Domain: commerce-adjacent, a fresh, independent `customers` table (reusing the shape of the existing `generateCustomers` generator) - not imported from Lab 03/04's own `customers` table. Ports 5429/8429.
 - [ ] 30 - large-table-backfills
 
 ## Phase 8 - PostgreSQL Operations and Performance
@@ -231,7 +231,22 @@ Postgres node.
   lab's subject is replication setup itself - see the lab's README
   "Architecture" for the full rationale and the bitnami-tag-availability
   caveat (only `latest`, currently PostgreSQL 18.6, is pullable without a
-  paid subscription as of 2025).
+  paid subscription as of 2025), 29 commerce-adjacent, a fresh,
+  independent `customers` table (id/public_id/full_name/
+  display_name/email/country) reusing the shape of the EXISTING
+  `generateCustomers` generator in `packages/data-generators/src/commerce.ts`
+  - not imported from Lab 03/04's own `customers` table, per the
+  independent-labs principle; `display_name` is added by this lab's own
+  migration 0001, not present in the shared generator's output.
+- Lab 29 adds no new shared-package code and made no changes under
+  `packages/` - it reuses the EXISTING `generateCustomers` generator as-is,
+  so no other lab needed re-validation. The dangerous rename in
+  `naive-rename-breaks-old-code.ts` deliberately runs against a throwaway
+  `customers_naive_demo` copy (created and left behind by the script, not
+  cleaned up automatically) rather than the real `customers` table, so this
+  lab's own seed data, other scenarios, and tests stay repeatable across
+  reruns - see that lab's README "Architecture" table for the full
+  Drizzle-tracked-migration-vs-raw-SQL design rationale.
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers

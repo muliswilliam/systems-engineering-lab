@@ -1,0 +1,38 @@
+name: lab29-safe-schema-migrations
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab29-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab29}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab29}
+      POSTGRES_DB: ${POSTGRES_DB:-lab29}
+    # log_statement=all makes every ALTER TABLE / CREATE INDEX / BEGIN / COMMIT
+    # visible in `docker compose logs postgres` - this lab is entirely about
+    # DDL and lock behavior, so seeing the literal statements (and their
+    # ordering relative to other sessions) matters.
+    command: ["postgres", "-c", "log_statement=all", "-c", "log_lock_waits=on"]
+    ports:
+      - "${POSTGRES_PORT:-5429}:5432"
+    volumes:
+      - lab29_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab29} -d ${POSTGRES_DB:-lab29}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab29-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab29}:${POSTGRES_PASSWORD:-lab29}@postgres:5432/${POSTGRES_DB:-lab29}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8429}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab29_postgres_data:
