@@ -1,0 +1,37 @@
+{
+  "name": "lab-32-deadlocks-and-lock-debugging",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "seed": "tsx src/seed/seed.ts",
+    "scenario:deadlock": "tsx src/scenarios/reproduce-deadlock.ts",
+    "scenario:ordered": "tsx src/scenarios/consistent-lock-ordering.ts",
+    "scenario:retry": "tsx src/scenarios/retry-on-deadlock.ts",
+    "scenario:trials": "tsx src/scenarios/many-trials.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:reset": "docker compose down -v && docker compose up -d",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@labs/db-utils": "workspace:*",
+    "@labs/logging": "workspace:*",
+    "@labs/data-generators": "workspace:*",
+    "@faker-js/faker": "^9.3.0",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.4",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@labs/test-utils": "workspace:*",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.28.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
