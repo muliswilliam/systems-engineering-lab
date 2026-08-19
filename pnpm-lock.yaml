@@ -478,6 +478,49 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)
 
+  labs/13-advisory-locks:
+    dependencies:
+      '@labs/data-generators':
+        specifier: workspace:*
+        version: link:../../packages/data-generators
+      '@labs/db-utils':
+        specifier: workspace:*
+        version: link:../../packages/db-utils
+      '@labs/logging':
+        specifier: workspace:*
+        version: link:../../packages/logging
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
+      drizzle-orm:
+        specifier: ^0.36.4
+        version: 0.36.4(@types/pg@8.23.1)(pg@8.23.0)
+      pg:
+        specifier: ^8.13.1
+        version: 8.23.0
+    devDependencies:
+      '@labs/test-utils':
+        specifier: workspace:*
+        version: link:../../packages/test-utils
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.1
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.23.1
+      drizzle-kit:
+        specifier: ^0.28.1
+        version: 0.28.1
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.12
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)
+
   packages/data-generators:
     dependencies:
       '@faker-js/faker':
