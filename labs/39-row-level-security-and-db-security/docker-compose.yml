@@ -1,0 +1,62 @@
+name: lab39-row-level-security-and-db-security
+
+# Independent of every other lab: own network (Compose project name above),
+# own named volume, own ports, own database. See README "Architecture" for
+# why this lab uses FOUR distinct Postgres roles instead of the one
+# superuser role every other lab in this repo connects as.
+#
+# sql/000-bootstrap-roles.sql is mounted into
+# /docker-entrypoint-initdb.d/, which the official postgres image runs
+# exactly once, as the POSTGRES_USER superuser, the first time the data
+# directory is initialized (i.e. on a fresh volume). That is the real
+# chicken-and-egg fix this lab teaches: a migration or app role cannot be
+# allowed to CREATE ROLE (that would itself violate least privilege - see
+# README "Setup"), so something with admin/superuser rights has to exist
+# BEFORE the migration role does, to create it. Here that something is
+# Postgres's own docker-bootstrap superuser, standing in for a real cloud
+# provider's "master user" (RDS/Cloud SQL). `docker compose down -v` removes
+# the volume, so `up -d` re-runs this script and recreates every role from
+# scratch - this is exercised explicitly in this lab's reset-cycle
+# validation.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab39-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_ADMIN_USER:-lab39_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:-lab39_admin_pw}
+      POSTGRES_DB: ${POSTGRES_DB:-lab39}
+    # log_statement=all makes it possible to see, in `docker compose logs
+    # postgres`, exactly which role executed which statement - useful while
+    # working through the least-privilege and RLS scenarios.
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "${POSTGRES_PORT:-5439}:5432"
+    volumes:
+      - lab39_postgres_data:/var/lib/postgresql/data
+      - ./sql/000-bootstrap-roles.sql:/docker-entrypoint-initdb.d/000-bootstrap-roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_ADMIN_USER:-lab39_admin} -d ${POSTGRES_DB:-lab39}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # PGweb connects as lab39_readonly, NOT the admin/migrator role - see
+  # README "Setup" for why: PGweb is a browser-exposed inspection tool, and
+  # per this lab's own least-privilege lesson it should hold the smallest
+  # privilege that lets a human browse the schema (SELECT only, subject to
+  # RLS like any other non-owner role - see README "Observe" for what that
+  # means for what you'll actually see in PGweb's table browser).
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab39-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_READONLY_USER:-lab39_readonly}:${POSTGRES_READONLY_PASSWORD:-lab39_readonly_pw}@postgres:5432/${POSTGRES_DB:-lab39}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8439}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab39_postgres_data:
