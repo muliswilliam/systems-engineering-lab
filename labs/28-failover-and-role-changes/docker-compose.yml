@@ -1,0 +1,90 @@
+name: lab28-failover-and-role-changes
+
+# Same bitnami/postgresql primary/standby SHAPE Lab 24 established (and Lab
+# 26 rebuilt independently) - see Lab 24's README.md "Architecture" for the
+# full rationale for using bitnami instead of postgres:16-alpine on both
+# nodes. This lab needs one extra real capability neither Lab 24 nor Lab 26
+# needed: the ability to genuinely PROMOTE the standby via SQL `pg_promote()`
+# (Postgres 12+), which bitnami's image supports out of the box because it is
+# just a normal physical standby under the hood - no special image feature is
+# required, only real docker-compose lifecycle control (`docker compose stop
+# primary`) from this lab's own scenario scripts/tests.
+#
+# Fully independent of Lab 24/25/26/27: own project name, own container
+# names, own network (implicit, Compose-project-scoped), own volumes, own
+# ports, own database name.
+services:
+  primary:
+    image: bitnami/postgresql:latest
+    container_name: lab28-primary
+    environment:
+      POSTGRESQL_REPLICATION_MODE: master
+      POSTGRESQL_REPLICATION_USER: ${REPLICATION_USER:-repl_user}
+      POSTGRESQL_REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-repl_password}
+      # POSTGRESQL_USERNAME is left unset (defaults to "postgres") so
+      # POSTGRESQL_PASSWORD sets the postgres SUPERUSER password directly -
+      # pg_promote() below requires superuser (or an explicit GRANT), and
+      # this lab's app connections use "postgres" throughout.
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-lab28}
+      POSTGRESQL_DATABASE: ${POSTGRES_DB:-lab28}
+      POSTGRESQL_ENABLE_TLS: "no"
+    ports:
+      - "${PRIMARY_POSTGRES_PORT:-5428}:5432"
+    volumes:
+      - lab28_primary_data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "${POSTGRES_DB:-lab28}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  replica:
+    image: bitnami/postgresql:latest
+    container_name: lab28-replica
+    environment:
+      POSTGRESQL_REPLICATION_MODE: slave
+      POSTGRESQL_REPLICATION_USER: ${REPLICATION_USER:-repl_user}
+      POSTGRESQL_REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-repl_password}
+      POSTGRESQL_MASTER_HOST: primary
+      POSTGRESQL_MASTER_PORT_NUMBER: "5432"
+      POSTGRESQL_PASSWORD: ${POSTGRES_PASSWORD:-lab28}
+      POSTGRESQL_DATABASE: ${POSTGRES_DB:-lab28}
+      POSTGRESQL_ENABLE_TLS: "no"
+    ports:
+      - "${REPLICA_POSTGRES_PORT:-5528}:5432"
+    volumes:
+      - lab28_replica_data:/bitnami/postgresql
+    depends_on:
+      primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "${POSTGRES_DB:-lab28}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  pgweb-primary:
+    image: sosedoff/pgweb
+    container_name: lab28-pgweb-primary
+    environment:
+      PGWEB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-lab28}@primary:5432/${POSTGRES_DB:-lab28}?sslmode=disable
+    ports:
+      - "${PRIMARY_PGWEB_PORT:-8428}:8081"
+    depends_on:
+      primary:
+        condition: service_healthy
+
+  pgweb-replica:
+    image: sosedoff/pgweb
+    container_name: lab28-pgweb-replica
+    environment:
+      PGWEB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-lab28}@replica:5432/${POSTGRES_DB:-lab28}?sslmode=disable
+    ports:
+      - "${REPLICA_PGWEB_PORT:-8528}:8081"
+    depends_on:
+      replica:
+        condition: service_healthy
+
+volumes:
+  lab28_primary_data:
+  lab28_replica_data:
