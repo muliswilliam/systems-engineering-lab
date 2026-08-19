@@ -1,0 +1,33 @@
+name: lab33-query-tuning-and-explain-analyze
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab33-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab33}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab33}
+      POSTGRES_DB: ${POSTGRES_DB:-lab33}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - lab33_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab33} -d ${POSTGRES_DB:-lab33}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab33-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab33}:${POSTGRES_PASSWORD:-lab33}@postgres:5432/${POSTGRES_DB:-lab33}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8433}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab33_postgres_data:
