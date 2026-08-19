@@ -1,0 +1,38 @@
+name: lab19-message-delivery-semantics
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab19-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab19}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab19}
+      POSTGRES_DB: ${POSTGRES_DB:-lab19}
+    # log_statement=all makes every INSERT into delivery_log and
+    # processed_message_ids visible in `docker compose logs postgres` - this
+    # lab is entirely about how many times something was actually written,
+    # so seeing the literal statement sequence matters.
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "${POSTGRES_PORT:-5419}:5432"
+    volumes:
+      - lab19_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab19} -d ${POSTGRES_DB:-lab19}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab19-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab19}:${POSTGRES_PASSWORD:-lab19}@postgres:5432/${POSTGRES_DB:-lab19}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8419}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab19_postgres_data:

@@ -39,7 +39,7 @@ ports.
 - [x] 16 - transactional-outbox - naive dual write reproduced in both directions (DB commits then simulated broker publish fails, leaving a durable order with zero recoverable `outbox_events` rows; simulated broker publish succeeds then the order INSERT is rejected by a real `orders_amount_cents_positive` CHECK violation (23514), leaving zero order rows despite the broker believing the event was sent) vs the fix (`BEGIN`; `INSERT order`; `INSERT outbox_event`; `COMMIT`), with a forced outbox-INSERT CHECK violation rolling back both rows together, plus a minimal one-shot (non-`SKIP LOCKED`, explicitly scoped as a Lab 17 preview) `drainOutbox` that publishes only `published_at IS NULL` rows and does not re-publish on a second run. Domain: a fresh, minimal commerce-adjacent schema, new (`orders` + `outbox_events` - deliberately not SPEC.md's full commerce model). Ports 5416/8416.
 - [ ] 17 - outbox-workers-skip-locked
 - [ ] 18 - inbox-pattern-and-idempotent-consumers
-- [ ] 19 - message-delivery-semantics
+- [x] 19 - message-delivery-semantics - a simulated, deterministic, seed-controlled network (message can be lost in transit, or the acknowledgment can be lost - two distinct failure points) drives three side-by-side delivery mechanisms sharing one `sendWithRetry` function: at-most-once (send once, never retry - a dropped message shows 1 `delivery_log` row and 0 receiver-side effects, real captured run), at-least-once with message-loss (2 `delivery_log` rows - 1 lost, 1 acked - receiver processes exactly once) vs. the same mechanism's ack-loss case (2 `delivery_log` rows, BOTH genuinely reaching the receiver - a real, asserted duplicate: `receiver_processed_count = 2`), and effectively-once (the identical ack-loss interleaving and the identical retry mechanism, only the receiver differs - an idempotent `processed_message_ids` UNIQUE-constraint check inside the same transaction as the business effect - `delivery_log` still shows 2 transport-level attempts, but `receiver_processed_count = 1`). Domain: a fresh, self-contained "notifications" domain (`notifications` + `delivery_log` + `processed_message_ids`), not imported from Labs 16-18 despite being their closest conceptual synthesis. Ports 5419/8419.
 - [ ] 20 - sagas-and-distributed-workflows
 
 ## Phase 5 - Caching and Distributed Coordination
@@ -152,7 +152,14 @@ ports.
   "Architecture" for the scoping rationale) seeded with Faker called
   directly in `src/seed/seed.ts` rather than a new `@labs/data-generators`
   file, since neither table is a generic reusable entity yet (same "no
-  speculative shared machinery" reasoning as Lab 05's `transfers`).
+  speculative shared machinery" reasoning as Lab 05's `transfers`), 19 a
+  fresh, self-contained "notification platform" domain (`notifications` +
+  `delivery_log` + `processed_message_ids`) - not one of SPEC.md 8.2's five
+  named domains and deliberately not imported from Labs 16-18 despite being
+  their closest conceptual synthesis, per the independent-labs principle;
+  same "small standalone table, not a rich relational model" rationale as
+  Lab 06's `counters`/Lab 11's `documents`/Lab 15's `payments`. Seeded with
+  Faker called directly in `src/seed/seed.ts`, same reasoning as Lab 16.
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
