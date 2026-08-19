@@ -34,7 +34,7 @@ ports.
 
 ## Phase 4 - Background Work and Messaging
 
-- [ ] 14 - job-queue-skip-locked
+- [x] 14 - job-queue-skip-locked - real 1/5/50-concurrent-worker draining of a shared `jobs` table via `SELECT ... FOR UPDATE SKIP LOCKED` (raw SQL, one claim transaction per job): 5 workers over 100 jobs each claimed exactly 20 (wall clock 71ms), 50 workers over 250 jobs each claimed exactly 5 with zero double-claims (wall clock 125ms; a fresh 200-job integration-test run measured 94ms); a `locked_until` lease lets a job whose worker never releases it (simulated crash) become reclaimable and completed by a different worker (measured reclaim latency 15ms past a 300ms lease); bounded retries via `attempts`/`max_attempts` move a job to a terminal `failed` status after 3 failed attempts and it is never claimed again; a real measured contrast (plain `FOR UPDATE` blocked a second worker for 312ms behind the first worker's lock vs. `SKIP LOCKED` resolving in 10ms by skipping to a different row) makes the naive-vs-fixed case concrete. No `workers` table - workers are ephemeral, identified only by a `worker_id` string on `job_attempts` (see README "Architecture" for why). Domain: background processing, new (`jobs` + `job_attempts`). Ports 5414/8414.
 - [ ] 15 - idempotency-and-deduplication
 - [ ] 16 - transactional-outbox
 - [ ] 17 - outbox-workers-skip-locked
@@ -121,7 +121,12 @@ ports.
   not one of SPEC.md section 8.2's five named domains, same rationale as
   Lab 06's `counters`: the lesson is the conditional-write/version-column
   mechanism itself, and a rich relational model around it would only add
-  noise; defined only in Lab 11's own schema, not shared).
+  noise; defined only in Lab 11's own schema, not shared), 14 background
+  processing (SPEC.md section 8.2's "Background processing" domain, new -
+  `jobs` + `job_attempts`; `packages/data-generators/src/jobs.ts` gained the
+  reusable `generateJobs` generator, exported from `index.ts`, purely
+  additive alongside the existing payroll/commerce/ledger generators -
+  Labs 01 and 05 were re-validated and are unaffected).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
