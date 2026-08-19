@@ -28,7 +28,7 @@ ports.
 ## Phase 3 - Locks and Concurrency Control
 
 - [ ] 10 - row-locks-and-select-for-update
-- [ ] 11 - conditional-writes-and-optimistic-concurrency
+- [x] 11 - conditional-writes-and-optimistic-concurrency - naive plain `UPDATE ... WHERE id = ?` (no version check) reproduces a real lost update (both UPDATEs report `rowCount=1`, only the later write survives) vs `UPDATE ... WHERE id = ? AND version = ?` (first writer `rowCount=1`, stale second writer `rowCount=0`, app-level re-read-and-retry then succeeds and folds in both edits) vs a plain conditional write on a business column (`WHERE status = 'draft'`, exactly 1 of 10 concurrent "publish" attempts succeeds) - plus a short side-by-side comparison script measuring pessimistic `SELECT ... FOR UPDATE` blocking (~310ms real measured wait) against optimistic's immediate `rowCount=0`. Domain: a standalone `documents` table (a wiki-page-style shared draft, not one of SPEC.md's five named domains - same rationale as Lab 06's `counters`). Ports 5411/8411.
 - [ ] 12 - ticket-reservation-system
 - [ ] 13 - advisory-locks
 
@@ -109,7 +109,12 @@ ports.
   named domains, since write skew specifically needs a small,
   easy-to-reason-about cross-row invariant rather than a rich relational
   model; Lab 09's Serializable lab is expected to reuse the same write-skew
-  shape to show Serializable catching what Repeatable Read cannot).
+  shape to show Serializable catching what Repeatable Read cannot), 11 a
+  standalone `documents` table (a wiki-page/shared-draft-style domain - also
+  not one of SPEC.md section 8.2's five named domains, same rationale as
+  Lab 06's `counters`: the lesson is the conditional-write/version-column
+  mechanism itself, and a rich relational model around it would only add
+  noise; defined only in Lab 11's own schema, not shared).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
