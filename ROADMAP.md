@@ -15,7 +15,7 @@ ports.
 - [x] 01 - postgres-drizzle-foundation - Docker Compose + Postgres + PGweb + Drizzle + seed + raw SQL alongside Drizzle. Domain: payroll (companies, employees). Ports 5401/8401.
 - [x] 02 - relational-modeling-and-constraints - naive (raw-SQL, unconstrained) vs corrected (FK, UNIQUE, CHECK, NOT NULL) schemas, asserting exact Postgres error codes (23502/23503/23505/23514) and the CHECK-can't-stop-a-transition limit. Domain: payroll (companies, employees + employment_status). Ports 5402/8402.
 - [x] 03 - sql-querying-and-query-plans - joins, aggregations, CTEs, window functions, and subqueries in both Drizzle and raw SQL, plus a naive (COUNT-inflated-by-join-fan-out) vs corrected (CTE pre-aggregation) reporting query and an EXPLAIN/EXPLAIN ANALYZE walkthrough with no indexes yet. Domain: commerce (customers, products, orders, order_lines). Ports 5403/8403.
-- [ ] 04 - indexes-and-performance-basics
+- [x] 04 - indexes-and-performance-basics - reuses Lab 03's commerce schema at 1M+ rows (seeded 60,000 customers / 500 products / ~300k orders / ~900k order_lines in ~37s via a streaming/batched generator); before/after `EXPLAIN ANALYZE` scenarios drop-then-recreate a plain B-tree, composite, partial, covering (`INCLUDE`), and expression index plus a low-selectivity index, all via a hand-written raw-SQL migration; measured real write-amplification (~29% lower insert throughput with the 6 indexes present) and index selectivity (planner ignores `idx_orders_status` for `status='paid'` at 58% of rows, uses it for `status='cancelled'` at 8%). Domain: commerce (customers, products, orders, order_lines). Ports 5404/8404.
 
 ## Phase 2 - Transactions and PostgreSQL Concurrency
 
@@ -93,4 +93,14 @@ ports.
 - Shared packages grow incrementally: only what a given lab actually needs is
   added (e.g. `generateEvents`/`generateSeats` land with the ticketing labs,
   not before).
-- Domains by lab, so far: 01 payroll, 02 payroll, 03 commerce.
+- Domains by lab, so far: 01 payroll, 02 payroll, 03 commerce, 04 commerce.
+- `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
+  (Lab 04) - a streaming/batched variant of `generateOrders` used for the
+  1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
+  are untouched. Both `commerce.ts`'s `generateCustomers` and
+  `payroll.ts`'s `generateEmployees` also deduplicate faker-generated
+  emails via a shared `toUniqueEmail` helper (`packages/data-generators/src/unique-email.ts`)
+  - faker's name-derived emails collide often enough at Lab 01/04's
+    `--size=large` scale to violate the `email` UNIQUE constraint
+    otherwise; the fix is a no-op at small sizes, so Labs 01-03's existing
+    seeded datasets are unaffected.

@@ -1,0 +1,38 @@
+name: lab04-indexes-and-performance-basics
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab04-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lab04}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab04}
+      POSTGRES_DB: ${POSTGRES_DB:-lab04}
+    # log_statement=all makes every SQL statement visible in `docker compose
+    # logs postgres`. Useful for Lab 01-03; for this lab's large seed it also
+    # means the log volume during a --size=large seed is substantial - that's
+    # expected, not a bug.
+    command: ["postgres", "-c", "log_statement=all"]
+    ports:
+      - "${POSTGRES_PORT:-5404}:5432"
+    volumes:
+      - lab04_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lab04} -d ${POSTGRES_DB:-lab04}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgweb:
+    image: sosedoff/pgweb
+    container_name: lab04-pgweb
+    environment:
+      PGWEB_DATABASE_URL: postgres://${POSTGRES_USER:-lab04}:${POSTGRES_PASSWORD:-lab04}@postgres:5432/${POSTGRES_DB:-lab04}?sslmode=disable
+    ports:
+      - "${PGWEB_PORT:-8404}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  lab04_postgres_data:
