@@ -1,4 +1,5 @@
 import { Faker, en } from "@faker-js/faker";
+import { toUniqueEmail } from "./unique-email.js";
 
 export interface GeneratedCompany {
   publicId: string;
@@ -80,6 +81,7 @@ export function generateEmployees(
 
   const roles = Object.keys(ROLE_SALARY_BAND_USD) as GeneratedEmployee["role"][];
   const employees: GeneratedEmployee[] = [];
+  const usedEmails = new Set<string>();
 
   companies.forEach((company, companyIndex) => {
     for (let i = 0; i < employeesPerCompany; i += 1) {
@@ -87,12 +89,13 @@ export function generateEmployees(
       const [min, max] = ROLE_SALARY_BAND_USD[role];
       const firstName = faker.person.firstName();
       const lastName = faker.person.lastName();
+      const baseEmail = faker.internet.email({ firstName, lastName }).toLowerCase();
 
       employees.push({
         publicId: faker.string.uuid(),
         companyIndex,
         fullName: `${firstName} ${lastName}`,
-        email: faker.internet.email({ firstName, lastName }).toLowerCase(),
+        email: toUniqueEmail(baseEmail, usedEmails),
         role,
         annualSalaryCents: faker.number.int({ min, max }) * 100,
         currency: company.currency,

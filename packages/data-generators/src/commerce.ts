@@ -1,4 +1,5 @@
 import { Faker, en } from "@faker-js/faker";
+import { toUniqueEmail } from "./unique-email.js";
 
 export interface GeneratedCustomer {
   publicId: string;
@@ -64,13 +65,17 @@ export function generateCustomers(count: number, seed: number): GeneratedCustome
   const faker = new Faker({ locale: en });
   faker.seed(seed);
 
+  const usedEmails = new Set<string>();
+
   return Array.from({ length: count }, () => {
     const firstName = faker.person.firstName();
     const lastName = faker.person.lastName();
+    const baseEmail = faker.internet.email({ firstName, lastName }).toLowerCase();
+
     return {
       publicId: faker.string.uuid(),
       fullName: `${firstName} ${lastName}`,
-      email: faker.internet.email({ firstName, lastName }).toLowerCase(),
+      email: toUniqueEmail(baseEmail, usedEmails),
       country: faker.helpers.arrayElement(COUNTRIES),
     };
   });
@@ -164,4 +169,81 @@ export function generateOrders(
   });
 
   return orders.sort((a, b) => a.placedAt.getTime() - b.placedAt.getTime());
+}
+
+export interface GenerateOrdersBatchedOptions {
+  customers: GeneratedCustomer[];
+  products: GeneratedProduct[];
+  maxOrdersPerCustomer: number;
+  seed: number;
+  /** Number of orders per yielded batch. Defaults to 1000. */
+  batchSize?: number;
+}
+
+/**
+ * Streaming/batched variant of generateOrders, added for Lab 04's 1M+ row
+ * seed (SPEC.md 8.4: "batch or stream inserts instead of loading millions of
+ * records into memory"). Materializing every GeneratedOrder into one big
+ * array before inserting would hold hundreds of thousands of objects (each
+ * carrying its own array of order lines) in memory at once for no reason -
+ * this generator yields orders in batches of `batchSize` as they are
+ * produced, so a caller can insert-and-discard each batch.
+ *
+ * Uses the exact same per-customer generation algorithm and faker call
+ * sequence as generateOrders above (deterministic per SPEC.md 8.1: same
+ * `seed` always produces the same logical orders). It deliberately does NOT
+ * do the final global sort-by-placedAt that generateOrders does - a global
+ * sort requires holding every order in memory at once, which is exactly
+ * what streaming exists to avoid. Each order's own placedAt is still a
+ * realistic, seeded value; only the cross-customer emission order is
+ * unsorted (irrelevant to any query or invariant in this repository - no
+ * lab relies on insertion order matching chronological order).
+ *
+ * This function is purely additive: generateOrders above is untouched, so
+ * every existing caller (Lab 03's seed and tests) is unaffected.
+ */
+export function* generateOrdersBatched(options: GenerateOrdersBatchedOptions): Generator<GeneratedOrder[]> {
+  const { customers, products, maxOrdersPerCustomer, seed, batchSize = 1000 } = options;
+
+  const faker = new Faker({ locale: en });
+  faker.seed(seed + 2);
+
+  const statusPool: OrderStatus[] = STATUS_WEIGHTS.flatMap((s) => Array<OrderStatus>(s.weight).fill(s.value));
+  const orderableProductCount = Math.max(1, Math.floor(products.length * ORDERABLE_CATALOG_FRACTION));
+  const productIndexes = products.map((_, index) => index).slice(0, orderableProductCount);
+
+  let batch: GeneratedOrder[] = [];
+
+  for (let customerIndex = 0; customerIndex < customers.length; customerIndex += 1) {
+    const orderCount = faker.number.int({ min: 0, max: maxOrdersPerCustomer });
+
+    for (let i = 0; i < orderCount; i += 1) {
+      const placedAt = faker.date.past({ years: 1 });
+      const status = faker.helpers.arrayElement(statusPool);
+      const lineCount = faker.number.int({ min: 1, max: 5 });
+      const chosenProductIndexes = faker.helpers.arrayElements(productIndexes, lineCount);
+
+      const lines: GeneratedOrderLine[] = chosenProductIndexes.map((productIndex) => {
+        const product = products[productIndex] as GeneratedProduct;
+        const quantity = faker.number.int({ min: 1, max: 4 });
+        const unitPriceCents = product.unitPriceCents;
+        return {
+          productIndex,
+          quantity,
+          unitPriceCents,
+          lineTotalCents: quantity * unitPriceCents,
+        };
+      });
+
+      batch.push({ customerIndex, status, placedAt, lines });
+      if (batch.length >= batchSize) {
+        yield batch;
+        batch = [];
+      }
+    }
+  }
+
+  if (batch.length > 0) {
+    yield batch;
+  }
 }
