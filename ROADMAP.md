@@ -6,9 +6,9 @@ per the Definition of Done in `CLAUDE.md`).
 Port convention (avoids collisions if two labs are ever run at once): lab `NN`
 uses host port `54NN` for its primary Postgres and `84NN` for its primary
 PGweb. Labs with a second Postgres node (replication, capstone) use `55NN`
-and `85NN` for the second node, `56NN`/`86NN` for a third, and so on. Each
-lab's own README and `.env.example` are the source of truth for its actual
-ports.
+and `85NN` for the second node, `56NN`/`86NN` for a third, and so on. Labs
+that add Redis (Lab 21+) use `64NN`, mirroring the same pattern. Each lab's
+own README and `.env.example` are the source of truth for its actual ports.
 
 ## Phase 1 - PostgreSQL and Drizzle Foundations
 
@@ -44,7 +44,7 @@ ports.
 
 ## Phase 5 - Caching and Distributed Coordination
 
-- [ ] 21 - cache-aside-and-cache-stampede
+- [x] 21 - cache-aside-and-cache-stampede - naive GET/miss/compute/SET cache-aside reproduces a real cache stampede (a 300-concurrent-request cold-cache burst against one product key produced a real measured `databaseCallCount: 300`, i.e. one slow database call per concurrent miss) vs. four independent mitigations measured against the identical burst: in-process request coalescing (an in-flight-promise map collapsed the same 300-request burst to exactly 1 database call, real captured run), a Redis `SET key value NX PX` lease simulated across 5 independent `ioredis` connections as 5 "processes" (300 total requests across them, `databaseCallCount: 1`, consistent across reruns; tests assert `<=2` to document a narrow, deliberately-unresolved lease-expiry race), stale-while-revalidate (a request past the 300ms fresh window but within the 5000ms stale window returned in a real measured 4ms vs. naive cache-aside's ~79ms full-database-latency miss, with a deduplicated background refresh bringing the entry current), and jittered TTL (200 keys populated at the same instant with a fixed 2000ms TTL all expired within one 25ms poll tick of each other - a measured 0ms spread - vs. a real measured 801ms expiration spread for the same 200 keys with a +/-20% jittered TTL). First lab in the repo to add Redis (`redis:7-alpine`, health-checked via `redis-cli ping`, no persistent volume) alongside Postgres+PGweb, per CLAUDE.md's explicit "Redis for caching/distributed-lock labs" allowance. Domain: a fresh, minimal commerce-adjacent `products` table (id/public_id/name/price_cents only - see README "Architecture" for the scoping rationale), seeded via `@labs/data-generators`'s existing `generateProducts`. Ports 5421/8421/6421 (new `64NN` Redis port convention, mirroring the existing `54NN`/`84NN` pattern).
 - [ ] 22 - redis-leases-and-distributed-locks
 
 ## Phase 6 - Connections and PostgreSQL Scaling
@@ -175,7 +175,21 @@ ports.
   closest conceptual synthesis, per the independent-labs principle; same
   "small standalone table, not a rich relational model" rationale as
   Lab 06's `counters`/Lab 11's `documents`/Lab 15's `payments`. Seeded with
-  Faker called directly in `src/seed/seed.ts`, same reasoning as Lab 16.
+  Faker called directly in `src/seed/seed.ts`, same reasoning as Lab 16,
+  21 a fresh, minimal commerce-adjacent `products` table (id/public_id/name/
+  price_cents only - deliberately not SPEC.md 8.2's full commerce model,
+  same scoping rationale as Lab 16's `orders`/`outbox_events`; see Lab 21's
+  README "Architecture"), seeded via the EXISTING `generateProducts` in
+  `packages/data-generators/src/commerce.ts` (only `name`/`unitPriceCents`
+  are carried over - `sku`/`category` are dropped since this schema has no
+  columns for them), no new generator added. Lab 21 is also the first lab
+  to add Redis (`redis:7-alpine`) alongside Postgres+PGweb in its
+  `docker-compose.yml`, per CLAUDE.md's explicit "Redis for caching/
+  distributed-lock labs" allowance - Redis connection handling
+  (`createRedisClient`/`waitForRedis`) is a small helper LOCAL to Lab 21
+  (`src/cache/redis-client.ts`), not a new shared package, since no second
+  consumer exists yet (see that file's doc comment for the reasoning and
+  the note that Lab 22 is a natural future promotion point).
 - `packages/data-generators/src/commerce.ts` gained `generateOrdersBatched`
   (Lab 04) - a streaming/batched variant of `generateOrders` used for the
   1M+-row seed, purely additive so Lab 03's `generateOrders` and its callers
