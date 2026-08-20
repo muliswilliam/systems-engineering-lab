@@ -404,6 +404,9 @@ full-suite runs).
   transfers forms the exact same cycle again. It only shortens how long the
   cycle survives once formed, by re-running the aborted work from scratch.
 
+See `docs/lock-reference.md` for a cross-lab quick-reference on deadlocks,
+`pg_locks`, and the other locking labs.
+
 ## Tradeoffs
 
 - **Consistent lock ordering requires knowing ALL the ways two rows might be

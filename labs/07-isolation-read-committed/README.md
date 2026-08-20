@@ -233,6 +233,9 @@ level onto the same Read Committed machinery (see
 `src/scenarios/read-uncommitted-vs-read-committed.ts` for the direct A/B
 comparison).
 
+See `docs/transaction-anomalies.md` for a cross-lab quick-reference on the
+non-repeatable read and the other anomalies Labs 06-09 cover.
+
 ## Tradeoffs
 
 - **Read Committed's per-statement snapshot vs Repeatable Read's per-transaction

@@ -391,6 +391,9 @@ is willing to wait for one*, respectively - neither one changes the
 migration's actual schema effect, only its blast radius against concurrent
 traffic.
 
+See `docs/lock-reference.md` for a cross-lab quick-reference on the
+table-level lock modes `CREATE INDEX`/`ALTER TABLE` take.
+
 ## Tradeoffs
 
 - **Expand/contract takes longer and needs more deploys than a single

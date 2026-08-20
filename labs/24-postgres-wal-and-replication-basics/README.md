@@ -310,6 +310,9 @@ route correctly - the same "keep guarantees close to the data" principle
 this repository has applied since Lab 01's foreign keys, just at the level
 of an entire node's role rather than a single constraint.
 
+See `docs/replication-reference.md` for a cross-lab quick-reference on
+WAL/LSN and the other replication labs.
+
 ## Tradeoffs
 
 - **Async streaming replication (this lab's default)**: the primary does

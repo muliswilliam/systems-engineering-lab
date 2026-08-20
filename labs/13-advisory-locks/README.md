@@ -269,6 +269,9 @@ held. Only mechanisms that are wired into Postgres's actual row-visibility
 and locking engine (row locks, `UPDATE`'s implicit lock, unique constraints,
 `CHECK` constraints) apply to every writer unconditionally.
 
+See `docs/lock-reference.md` for a cross-lab quick-reference on advisory
+locks and the other locking labs.
+
 ## Tradeoffs
 
 - **Advisory locks vs. row locks for "one worker per company"**: an advisory

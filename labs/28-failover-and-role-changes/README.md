@@ -293,6 +293,9 @@ response to a real primary failure - it is not something to "avoid" the way
 a race condition is. What matters is *who decides to trigger it and how
 fast*, which is exactly the part this lab deliberately leaves external.
 
+See `docs/replication-reference.md` for a cross-lab quick-reference on
+failover and the other replication labs.
+
 ## Tradeoffs
 
 - **`pg_promote()` (SQL function) vs. the trigger-file mechanism**: older

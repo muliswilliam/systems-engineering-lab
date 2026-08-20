@@ -336,6 +336,9 @@ role as an upstream for replica-2 are independent concerns, so restarting
 it resumes both automatically, in the order Postgres's own WAL positions
 dictate - no application code coordinates any of this.
 
+See `docs/replication-reference.md` for a cross-lab quick-reference on
+cascading replicas and the other replication labs.
+
 ## Tradeoffs
 
 - **Reduced primary fan-out vs. an added single point of failure**: the

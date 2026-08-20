@@ -315,6 +315,9 @@ patterns this repository has used since Lab 10/11 to keep an invariant close
 to the data that owns it, just applied to a node-level staleness invariant
 instead of a row-level one.
 
+See `docs/replication-reference.md` for a cross-lab quick-reference on
+read-after-write strategies and the other replication labs.
+
 ## Tradeoffs
 
 | Strategy | Correctness guarantee | Read cost | Scales? | Needs tuning? |

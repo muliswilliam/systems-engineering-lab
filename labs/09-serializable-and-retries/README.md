@@ -243,6 +243,9 @@ attempt is sufficient to reach a correct final state: every surviving
 committed transaction is consistent with *some* serial ordering of all
 transactions that ever ran.
 
+See `docs/transaction-anomalies.md` for a cross-lab quick-reference on
+serialization failures and the other anomalies Labs 06-09 cover.
+
 ## Tradeoffs
 
 - **Repeatable Read vs Serializable**: Repeatable Read never aborts a

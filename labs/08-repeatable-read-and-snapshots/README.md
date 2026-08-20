@@ -281,6 +281,9 @@ it has no way to know that a *different* row's concurrent update might
 matter to your business logic. That narrowness is precisely the gap write
 skew exploits.
 
+See `docs/transaction-anomalies.md` for a cross-lab quick-reference on write
+skew and the other anomalies Labs 06-09 cover.
+
 ## Tradeoffs
 
 - **Repeatable Read's one-snapshot-per-transaction vs Read Committed's

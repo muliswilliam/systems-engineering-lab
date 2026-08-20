@@ -309,6 +309,9 @@ whichever one runs while `status` is still `'draft'` wins, and by the time
 any other queued `UPDATE` re-evaluates its `WHERE` clause, `status` has
 already changed - so it matches zero rows too.
 
+See `docs/transaction-anomalies.md` for a cross-lab quick-reference on the
+lost update and the other anomalies Labs 06-09 cover.
+
 ## Tradeoffs
 
 - **Pessimistic locking (`SELECT ... FOR UPDATE`, Lab 10) blocks and waits.**

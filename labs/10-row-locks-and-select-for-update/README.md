@@ -238,6 +238,9 @@ transaction's ID (which owns the row's exclusive tuple lock) has committed
 or aborted yet. That is what "waiting for a row lock" concretely is in
 Postgres: waiting to be notified that a specific transaction ID has finished.
 
+See `docs/lock-reference.md` for a cross-lab quick-reference on row lock
+modes, `NOWAIT`/`lock_timeout`, and the other locking labs.
+
 ## Tradeoffs
 
 - **`FOR UPDATE` vs a plain read-modify-write**: `FOR UPDATE` closes the lost

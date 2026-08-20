@@ -317,6 +317,9 @@ at all, so they fall into the same `replica` branch as every other read,
 and Postgres's very first WAL-logging statement inside that transaction
 (the locking `SELECT`) rejects it outright.
 
+See `docs/replication-reference.md` for a cross-lab quick-reference on
+read-write routing and the other replication labs.
+
 ## Tradeoffs
 
 - **This lab's router is application-level, not infrastructure-level.** An

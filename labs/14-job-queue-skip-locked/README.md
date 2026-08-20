@@ -320,6 +320,9 @@ now()`) is a purely time-based, no-heartbeat-required way to notice this: no
 process needs to detect the crash for the job to become reclaimable again,
 `now() > locked_until` is enough.
 
+See `docs/lock-reference.md` for a cross-lab quick-reference on
+`SKIP LOCKED` and the other locking labs.
+
 ## Tradeoffs
 
 - **`SKIP LOCKED` gives up strict FIFO ordering.** A worker that skips a

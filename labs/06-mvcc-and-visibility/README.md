@@ -13,6 +13,19 @@ transaction is dangerous) are all downstream of the same fact: an `UPDATE`
 never overwrites a row, it creates a new tuple version next to the old one.
 This lab makes that fact impossible to un-see.
 
+**Three fields you'll see from the very first prediction question, defined
+up front so you're not guessing at vocabulary while you read them:**
+`xmin` is the id of the transaction that created a given tuple (row
+version). `xmax` is the id of the transaction that deleted or replaced it -
+`0` means "still live, nobody has superseded it yet." `ctid` is that
+tuple's current physical location (page number, offset within the page) in
+the table's file on disk. A "snapshot" is just the set of transaction ids
+Postgres is willing to treat as already-committed as of some moment in
+time. That's what these things *are*. *Why* they combine to produce the
+guarantees below - why a plain read never blocks, why dirty reads can't
+happen - is the subject of "Why the fix works" further down; this
+paragraph is only the glossary you can flip back to in the meantime.
+
 ## Learning objectives
 
 After this lab you should be able to:
@@ -222,6 +235,9 @@ readers required. That is also exactly why a plain reader never blocks a
 writer: the writer is free to create a new tuple version at any time,
 because it doesn't touch the tuple version any existing reader's snapshot
 is already looking at.
+
+See `docs/transaction-anomalies.md` for a cross-lab quick-reference on this
+and the other transaction anomalies Labs 07-09 build on top of it.
 
 ## Tradeoffs
 
