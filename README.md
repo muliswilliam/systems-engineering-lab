@@ -10,7 +10,8 @@ lock waits, replication lag, retries, serialization failures - visible,
 reproducible, and understandable.
 
 See [`SPEC.md`](./SPEC.md) for the full curriculum design and
-[`ROADMAP.md`](./ROADMAP.md) for current lab status.
+[`ROADMAP.md`](./ROADMAP.md) for current lab status. Track your own
+progress through the curriculum in [`PROGRESS.md`](./PROGRESS.md).
 
 ## How this repository works
 
